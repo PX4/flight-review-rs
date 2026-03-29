@@ -6,7 +6,7 @@ description = "Flight Review v2 — ULog to Parquet conversion and metadata extr
 license = "MIT"
 
 [dependencies]
-px4-ulog = { git = "https://github.com/mrpollo/px4-ulog-rs.git", branch = "test/comprehensive-test-coverage" }
+px4-ulog = { path = "../px4-ulog-rs" }
 arrow = { version = "54", features = ["prettyprint"] }
 parquet = { version = "54", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
