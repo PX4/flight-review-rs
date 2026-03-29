@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Flight Review v2 — ULog to Parquet conversion and metadata extraction"
 license = "MIT"
+repository = "https://github.com/PX4/flight-review-rs"
+keywords = ["px4", "ulog", "parquet", "flight-review", "drone"]
+categories = ["science", "command-line-utilities", "parser-implementations"]
 
 [dependencies]
-px4-ulog = { path = "../px4-ulog-rs" }
+px4-ulog = { git = "https://github.com/mrpollo/px4-ulog-rs.git", branch = "test/comprehensive-test-coverage" }
 arrow = { version = "54", features = ["prettyprint"] }
 parquet = { version = "54", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }

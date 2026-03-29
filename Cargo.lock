@@ -1036,6 +1036,7 @@ dependencies = [
 [[package]]
 name = "px4-ulog"
 version = "0.1.1"
+source = "git+https://github.com/mrpollo/px4-ulog-rs.git?branch=test%2Fcomprehensive-test-coverage#95514a6f610e79f3971a89a5a1a4ea04e505143a"
 dependencies = [
  "byteorder",
 ]
