@@ -5,5 +5,23 @@ edition = "2021"
 description = "Flight Review v2 — HTTP API server"
 license = "MIT"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sqlx/sqlite"]
+postgres = ["sqlx/postgres"]
+s3 = ["object_store/aws"]
+
 [dependencies]
 flight-review = { path = "../converter" }
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.8", features = ["runtime-tokio", "migrate"] }
+object_store = "0.12"
+uuid = { version = "1", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2"
