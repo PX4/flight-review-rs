@@ -400,7 +400,9 @@ mod tests {
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         let path = std::path::Path::new(manifest)
-            .parent().unwrap()
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .parent().unwrap()  // ulog/
             .join("px4-ulog-rs/tests/fixtures")
             .join(name);
         path.to_string_lossy().to_string()

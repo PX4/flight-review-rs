@@ -1,25 +1,6 @@
-[package]
-name = "flight-review"
-version = "0.1.0"
-edition = "2021"
-description = "Flight Review v2 — ULog to Parquet conversion and metadata extraction"
-license = "MIT"
-repository = "https://github.com/PX4/flight-review-rs"
-keywords = ["px4", "ulog", "parquet", "flight-review", "drone"]
-categories = ["science", "command-line-utilities", "parser-implementations"]
-
-[dependencies]
-px4-ulog = { git = "https://github.com/mrpollo/px4-ulog-rs.git", branch = "test/comprehensive-test-coverage" }
-arrow = { version = "54", features = ["prettyprint"] }
-parquet = { version = "54", features = ["arrow"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-thiserror = "2"
-clap = { version = "4", features = ["derive"] }
-
-[[bin]]
-name = "ulog-convert"
-path = "src/bin/ulog_convert.rs"
-
-[dev-dependencies]
-tempfile = "3"
+[workspace]
+resolver = "2"
+members = [
+    "crates/converter",
+    "crates/server",
+]

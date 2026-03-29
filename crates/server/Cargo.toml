@@ -1,0 +1,9 @@
+[package]
+name = "flight-review-server"
+version = "0.1.0"
+edition = "2021"
+description = "Flight Review v2 — HTTP API server"
+license = "MIT"
+
+[dependencies]
+flight-review = { path = "../converter" }
