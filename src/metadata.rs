@@ -455,9 +455,73 @@ mod tests {
 
         // fixed_wing_gps.ulg has version 1 and FlagBits message
         assert_eq!(meta.file_version, 1);
-        // FlagBits are present (all zeros for this file, but parsed)
         assert_eq!(meta.compat_flags.len(), 8);
         assert_eq!(meta.incompat_flags.len(), 8);
         assert_eq!(meta.appended_offsets.len(), 3);
+
+        // Derived fields
+        assert!(meta.flight_duration_s.unwrap() > 100.0, "Should have substantial flight duration");
+        assert_eq!(meta.ver_sw_release_str.as_deref(), Some("1.14.4-release"));
+
+        // GPS first fix
+        let gps = meta.gps_first_fix.as_ref().expect("Should have GPS fix");
+        assert!(gps.lat_deg.abs() > 0.0 && gps.lat_deg.abs() <= 90.0);
+        assert!(gps.lon_deg.abs() > 0.0 && gps.lon_deg.abs() <= 180.0);
+
+        // Parameters
+        assert!(meta.parameters.len() > 1000);
+        assert!(meta.default_parameters.len() > 100);
+
+        // Multi-info
+        assert!(!meta.multi_info.is_empty(), "Should have multi-info messages");
+        assert!(meta.multi_info.contains_key("metadata_events"));
+    }
+
+    #[test]
+    fn test_metadata_json_completeness() {
+        let meta = extract_metadata(&px4_ulog_fixture("fixed_wing_gps.ulg")).unwrap();
+        let json = serde_json::to_string_pretty(&meta).unwrap();
+
+        // All major sections present in JSON
+        for field in &[
+            "parameters", "logged_messages", "multi_info", "default_parameters",
+            "flight_duration_s", "ver_sw_release_str", "gps_first_fix",
+            "compat_flags", "incompat_flags", "file_version",
+        ] {
+            assert!(json.contains(field), "JSON should contain '{}'", field);
+        }
+    }
+
+    #[test]
+    #[ignore] // Run with: cargo test -- --ignored (requires /tmp/huge.ulg)
+    fn test_extract_metadata_huge_ulg() {
+        let path = "/tmp/huge.ulg";
+        if !std::path::Path::new(path).exists() {
+            eprintln!("Skipping: {} not found", path);
+            return;
+        }
+
+        let start = std::time::Instant::now();
+        let meta = extract_metadata(path).unwrap();
+        let elapsed = start.elapsed();
+
+        println!("Huge log metadata extraction: {:.0}ms", elapsed.as_millis());
+        println!("Parameters: {}", meta.parameters.len());
+        println!("Topics: {}", meta.topics.len());
+        println!("Logged messages: {}", meta.logged_messages.len());
+        println!("Multi-info keys: {:?}", meta.multi_info.keys().collect::<Vec<_>>());
+        println!("Flight duration: {:?}s", meta.flight_duration_s);
+        println!("GPS fix: {:?}", meta.gps_first_fix);
+
+        // Basic sanity
+        assert!(meta.parameters.len() > 500);
+        assert!(meta.topics.len() > 50);
+        assert!(meta.flight_duration_s.unwrap() > 0.0);
+        assert!(meta.file_version >= 1);
+
+        // JSON serialization should work
+        let json = serde_json::to_string_pretty(&meta).unwrap();
+        assert!(json.len() > 1000);
+        println!("metadata.json size: {} KB", json.len() / 1024);
     }
 }
