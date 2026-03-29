@@ -119,6 +119,22 @@ pub struct FlightMetadata {
     /// Multi-info messages (reassembled). Keys like "metadata_events", "perf_counter_preflight",
     /// "boot_console_output", etc. Each key maps to a list of values.
     pub multi_info: HashMap<String, Vec<String>>,
+    /// Flight duration in seconds (last data timestamp - first data timestamp)
+    pub flight_duration_s: Option<f64>,
+    /// Human-readable software version (decoded from ver_sw_release)
+    pub ver_sw_release_str: Option<String>,
+    /// GPS first-fix position (first valid lat/lon/alt from vehicle_gps_position)
+    pub gps_first_fix: Option<GpsPosition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpsPosition {
+    /// Latitude in degrees
+    pub lat_deg: f64,
+    /// Longitude in degrees
+    pub lon_deg: f64,
+    /// Altitude MSL in meters
+    pub alt_m: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +174,9 @@ impl Default for FlightMetadata {
             removed_logged_ids: Vec::new(),
             sync_count: 0,
             multi_info: HashMap::new(),
+            flight_duration_s: None,
+            ver_sw_release_str: None,
+            gps_first_fix: None,
         }
     }
 }
@@ -193,6 +212,10 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
     // Temporary buffer for reassembling multi-info message fragments
     let mut multi_info_buffers: HashMap<String, Vec<u8>> = HashMap::new();
 
+    // Track first/last data timestamps for flight duration
+    let mut first_data_timestamp_us: Option<u64> = None;
+    let mut last_data_timestamp_us: Option<u64> = None;
+
     // Stream through the file collecting metadata
     read_file_with_simple_callback(path, &mut |msg| {
         match msg {
@@ -203,6 +226,36 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                     multi_id: data.multi_id.value(),
                 });
                 entry.message_count += 1;
+
+                // Track timestamps for flight duration
+                if let Some(ts_field) = &data.flattened_format.timestamp_field {
+                    let ts = ts_field.parse_timestamp(data.data);
+                    if first_data_timestamp_us.is_none() {
+                        first_data_timestamp_us = Some(ts);
+                    }
+                    last_data_timestamp_us = Some(ts);
+                }
+
+                // Extract GPS first-fix from vehicle_gps_position
+                if meta.gps_first_fix.is_none() && topic == "vehicle_gps_position" {
+                    if let (Ok(lat_parser), Ok(lon_parser), Ok(alt_parser)) = (
+                        data.flattened_format.get_field_parser::<i32>("lat"),
+                        data.flattened_format.get_field_parser::<i32>("lon"),
+                        data.flattened_format.get_field_parser::<i32>("alt"),
+                    ) {
+                        let lat = lat_parser.parse(data.data);
+                        let lon = lon_parser.parse(data.data);
+                        let alt = alt_parser.parse(data.data);
+                        // Only record if we have a valid fix (non-zero lat/lon)
+                        if lat != 0 && lon != 0 {
+                            meta.gps_first_fix = Some(GpsPosition {
+                                lat_deg: lat as f64 * 1e-7,
+                                lon_deg: lon as f64 * 1e-7,
+                                alt_m: alt as f64 * 1e-3,
+                            });
+                        }
+                    }
+                }
             }
             Message::InfoMessage(info) => {
                 let val_str = String::from_utf8_lossy(info.value).to_string();
@@ -312,6 +365,30 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
         }
         SimpleCallbackResult::KeepReading
     })?;
+
+    // Compute flight duration
+    if let (Some(first), Some(last)) = (first_data_timestamp_us, last_data_timestamp_us) {
+        if last > first {
+            meta.flight_duration_s = Some((last - first) as f64 / 1_000_000.0);
+        }
+    }
+
+    // Format software version string from encoded release
+    if let Some(release) = meta.ver_sw_release {
+        let major = (release >> 24) & 0xFF;
+        let minor = (release >> 16) & 0xFF;
+        let patch = (release >> 8) & 0xFF;
+        let release_type = release & 0xFF;
+        let type_str = match release_type {
+            0 => "dev",
+            64 => "alpha",
+            128 => "beta",
+            192 => "rc",
+            255 => "release",
+            _ => "unknown",
+        };
+        meta.ver_sw_release_str = Some(format!("{}.{}.{}-{}", major, minor, patch, type_str));
+    }
 
     Ok(meta)
 }
