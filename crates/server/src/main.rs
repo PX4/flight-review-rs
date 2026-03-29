@@ -1,4 +1,5 @@
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{get, post},
     Router,
 };
@@ -60,7 +61,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(api::health::health))
-        .route("/api/upload", post(api::upload::upload))
+        .route("/api/upload", post(api::upload::upload)
+            .layer(DefaultBodyLimit::max(512 * 1024 * 1024))) // 512 MB
         .route("/api/logs", get(api::logs::list_logs))
         .route(
             "/api/logs/{id}",
