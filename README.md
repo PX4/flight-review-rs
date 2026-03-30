@@ -275,6 +275,8 @@ docker run -p 8080:8080 \
 
 The migration tool imports metadata from a v1 Flight Review SQLite database into v2, preserving all UUIDs, delete tokens, and public/private flags. No log files are moved -- the original `.ulg` files stay in their existing storage location. Logs are converted to Parquet lazily on first view, or optionally in batch.
 
+The migration extracts what it can from v1's `LogsGenerated` table (vehicle type from `MavType`, error/warning counts, vehicle UUID, software git hash). Fields that require parsing the `.ulg` file (vibration status, GPS quality, battery stats, localization sources, flight distance) remain unpopulated until the log is converted -- either lazily on first view or via batch conversion. Search and statistics results for these fields will be incomplete until conversion occurs.
+
 ### Metadata import + lazy conversion (recommended)
 
 Import database records instantly. Logs are converted to Parquet on first view. No downtime, no batch job required.
