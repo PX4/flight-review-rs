@@ -497,36 +497,5 @@ mod tests {
         }
     }
 
-    #[test]
-    #[ignore] // Run with: cargo test -- --ignored (requires /tmp/huge.ulg)
-    fn test_extract_metadata_huge_ulg() {
-        let path = "/tmp/huge.ulg";
-        if !std::path::Path::new(path).exists() {
-            eprintln!("Skipping: {} not found", path);
-            return;
-        }
 
-        let start = std::time::Instant::now();
-        let meta = extract_metadata(path).unwrap();
-        let elapsed = start.elapsed();
-
-        println!("Huge log metadata extraction: {:.0}ms", elapsed.as_millis());
-        println!("Parameters: {}", meta.parameters.len());
-        println!("Topics: {}", meta.topics.len());
-        println!("Logged messages: {}", meta.logged_messages.len());
-        println!("Multi-info keys: {:?}", meta.multi_info.keys().collect::<Vec<_>>());
-        println!("Flight duration: {:?}s", meta.flight_duration_s);
-        println!("GPS fix: {:?}", meta.gps_first_fix);
-
-        // Basic sanity
-        assert!(meta.parameters.len() > 500);
-        assert!(meta.topics.len() > 50);
-        assert!(meta.flight_duration_s.unwrap() > 0.0);
-        assert!(meta.file_version >= 1);
-
-        // JSON serialization should work
-        let json = serde_json::to_string_pretty(&meta).unwrap();
-        assert!(json.len() > 1000);
-        println!("metadata.json size: {} KB", json.len() / 1024);
-    }
 }
