@@ -474,17 +474,25 @@ mod tests {
 
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        std::path::Path::new(manifest)
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
+
+        // First: check local fixtures in the converter crate
+        let local = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .join("crates/converter/tests/fixtures")
+            .join(name);
+        if local.exists() {
+            return local.to_string_lossy().to_string();
+        }
+
+        // Fallback: px4-ulog-rs repo (local dev)
+        let external = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .parent().unwrap()  // ulog/
             .join("px4-ulog-rs/tests/fixtures")
-            .join(name)
-            .to_string_lossy()
-            .to_string()
+            .join(name);
+        external.to_string_lossy().to_string()
     }
 
     #[test]
@@ -524,6 +532,10 @@ mod tests {
     #[test]
     fn test_pid_analysis_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("Skipping: fixed_wing_gps.ulg not available");
+            return;
+        }
         let result = pid_analysis(&path).unwrap();
         // Should not error; may or may not have axes depending on log content
         for axis_result in &result.axes {

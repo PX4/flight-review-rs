@@ -16,13 +16,22 @@ fn free_port() -> u16 {
 /// Resolve a test fixture path relative to the workspace root.
 fn fixture_path(name: &str) -> std::path::PathBuf {
     let manifest = env!("CARGO_MANIFEST_DIR");
+
+    // First: check local fixtures in the converter crate
+    let local = std::path::Path::new(manifest)
+        .parent().unwrap()  // crates/
+        .parent().unwrap()  // workspace root
+        .join("crates/converter/tests/fixtures")
+        .join(name);
+    if local.exists() {
+        return local;
+    }
+
+    // Fallback: px4-ulog-rs repo (local dev)
     std::path::Path::new(manifest)
-        .parent()
-        .unwrap() // crates/
-        .parent()
-        .unwrap() // workspace root
-        .parent()
-        .unwrap() // ulog/
+        .parent().unwrap()  // crates/
+        .parent().unwrap()  // workspace root
+        .parent().unwrap()  // ulog/
         .join("px4-ulog-rs/tests/fixtures")
         .join(name)
 }
