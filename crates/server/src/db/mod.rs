@@ -249,6 +249,11 @@ pub struct ListFilters {
     pub lon: Option<f64>,
     /// Radius in km for geographic search
     pub radius_km: Option<f64>,
+
+    /// Filter: field max exceeds threshold. Format: "topic.field:value"
+    pub field_max: Option<String>,
+    /// Filter: field min below threshold. Format: "topic.field:value"
+    pub field_min: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -315,6 +320,7 @@ pub trait LogStore: Send + Sync {
     async fn insert_topics(&self, log_id: Uuid, topics: &[(String, i32)]) -> Result<(), DbError>;
     async fn insert_tags(&self, log_id: Uuid, tags: &[String]) -> Result<(), DbError>;
     async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError>;
+    async fn insert_field_stats(&self, log_id: Uuid, stats: &[FieldStatRecord]) -> Result<(), DbError>;
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError>;
 }
 
@@ -337,6 +343,17 @@ pub fn bounding_box(lat: f64, lon: f64, radius_km: f64) -> (f64, f64, f64, f64) 
         radius_km / (111.32 * cos_lat)
     };
     (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta)
+}
+
+/// A record for the `log_field_stats` junction table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldStatRecord {
+    pub topic: String,
+    pub field: String,
+    pub min_val: f64,
+    pub max_val: f64,
+    pub mean_val: f64,
+    pub count: i64,
 }
 
 pub async fn create_db(url: &str) -> Result<Arc<dyn LogStore>, DbError> {

@@ -8,7 +8,9 @@ use crate::metadata::{FlightMetadata, ParamValue};
 use px4_ulog::stream_parser::file_reader::{
     read_file_with_simple_callback, Message, SimpleCallbackResult,
 };
+use px4_ulog::stream_parser::model::FlattenedFieldType;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlightAnalysis {
@@ -20,6 +22,18 @@ pub struct FlightAnalysis {
     pub vibration: VibrationSummary,
     pub non_default_params: Vec<ParamDiff>,
     pub gps_track: Vec<TrackPoint>,
+    /// Per-topic-field statistics (min, max, mean)
+    pub field_stats: Vec<FieldStat>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldStat {
+    pub topic: String,
+    pub field: String,
+    pub min: f64,
+    pub max: f64,
+    pub mean: f64,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +105,119 @@ pub struct TrackPoint {
     pub alt_m: f64,
     pub timestamp_us: u64,
     pub mode_id: u8,
+}
+
+/// Maximum number of non-timestamp numeric fields to track per topic.
+const MAX_FIELDS_PER_TOPIC: usize = 10;
+
+/// Running statistics accumulator for a single field.
+struct RunningStats {
+    topic: String,
+    field: String,
+    min: f64,
+    max: f64,
+    sum: f64,
+    count: u64,
+    /// Offset into the data message for this field.
+    offset: u16,
+    /// The field type, used to parse the raw bytes.
+    field_type: FlattenedFieldType,
+}
+
+impl RunningStats {
+    fn new(topic: String, field: String, offset: u16, field_type: FlattenedFieldType) -> Self {
+        Self {
+            topic,
+            field,
+            min: f64::MAX,
+            max: f64::MIN,
+            sum: 0.0,
+            count: 0,
+            offset,
+            field_type,
+        }
+    }
+
+    /// Parse the value from raw message bytes and update running stats.
+    fn update(&mut self, data: &[u8]) {
+        let off = self.offset as usize;
+        if off >= data.len() {
+            return;
+        }
+        let val = match self.field_type {
+            FlattenedFieldType::Float => {
+                if off + 4 > data.len() { return; }
+                f32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::Double => {
+                if off + 8 > data.len() { return; }
+                f64::from_le_bytes(data[off..off + 8].try_into().unwrap())
+            }
+            FlattenedFieldType::Int32 => {
+                if off + 4 > data.len() { return; }
+                i32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::UInt32 => {
+                if off + 4 > data.len() { return; }
+                u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::Int16 => {
+                if off + 2 > data.len() { return; }
+                i16::from_le_bytes(data[off..off + 2].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::UInt16 => {
+                if off + 2 > data.len() { return; }
+                u16::from_le_bytes(data[off..off + 2].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::Int8 => {
+                data[off] as i8 as f64
+            }
+            FlattenedFieldType::UInt8 => {
+                data[off] as f64
+            }
+            FlattenedFieldType::Int64 => {
+                if off + 8 > data.len() { return; }
+                i64::from_le_bytes(data[off..off + 8].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::UInt64 => {
+                if off + 8 > data.len() { return; }
+                u64::from_le_bytes(data[off..off + 8].try_into().unwrap()) as f64
+            }
+            FlattenedFieldType::Bool | FlattenedFieldType::Char => return,
+        };
+
+        if !val.is_finite() {
+            return;
+        }
+
+        if val < self.min {
+            self.min = val;
+        }
+        if val > self.max {
+            self.max = val;
+        }
+        self.sum += val;
+        self.count += 1;
+    }
+
+    fn into_field_stat(self) -> Option<FieldStat> {
+        if self.count == 0 {
+            return None;
+        }
+        Some(FieldStat {
+            topic: self.topic,
+            field: self.field,
+            min: self.min,
+            max: self.max,
+            mean: self.sum / self.count as f64,
+            count: self.count,
+        })
+    }
+}
+
+/// Returns true if a field type is numeric (should be tracked for stats).
+fn is_numeric_field_type(ft: &FlattenedFieldType) -> bool {
+    !matches!(ft, FlattenedFieldType::Bool | FlattenedFieldType::Char)
 }
 
 fn nav_state_name(id: u8) -> &'static str {
@@ -198,6 +325,12 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     // We'll finalize modes after the pass, so track raw mode changes
     let mut mode_changes: Vec<(u64, u8)> = Vec::new();
 
+    // Per-field stats: topic -> Vec<RunningStats>
+    // On first message for each topic, discover numeric fields and create RunningStats entries.
+    // Key is (message_name, msg_id) to handle multi-instance topics.
+    let mut field_stats_map: HashMap<String, Vec<RunningStats>> = HashMap::new();
+    let mut topics_initialized: HashMap<String, bool> = HashMap::new();
+
     read_file_with_simple_callback(path, &mut |msg| {
         match msg {
             Message::Data(data) => {
@@ -207,6 +340,39 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                     .timestamp_field
                     .as_ref()
                     .map(|tf| tf.parse_timestamp(data.data));
+
+                // --- Per-field stats tracking (all topics) ---
+                if !topics_initialized.contains_key(topic) {
+                    topics_initialized.insert(topic.to_string(), true);
+                    let mut stats_vec = Vec::new();
+                    let mut numeric_count = 0;
+                    for field in data.flattened_format.field_iter() {
+                        // Skip timestamp field
+                        if field.flattened_field_name == "timestamp" {
+                            continue;
+                        }
+                        if !is_numeric_field_type(&field.field_type) {
+                            continue;
+                        }
+                        if numeric_count >= MAX_FIELDS_PER_TOPIC {
+                            break;
+                        }
+                        stats_vec.push(RunningStats::new(
+                            topic.to_string(),
+                            field.flattened_field_name.clone(),
+                            field.offset,
+                            field.field_type.clone(),
+                        ));
+                        numeric_count += 1;
+                    }
+                    field_stats_map.insert(topic.to_string(), stats_vec);
+                }
+
+                if let Some(stats_vec) = field_stats_map.get_mut(topic) {
+                    for rs in stats_vec.iter_mut() {
+                        rs.update(data.data);
+                    }
+                }
 
                 match topic {
                     "vehicle_status" => {
@@ -648,6 +814,19 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
         };
     }
 
+    // --- Finalize per-field stats ---
+    for (_topic, stats_vec) in field_stats_map {
+        for rs in stats_vec {
+            if let Some(fs) = rs.into_field_stat() {
+                analysis.field_stats.push(fs);
+            }
+        }
+    }
+    // Sort for deterministic output
+    analysis
+        .field_stats
+        .sort_by(|a, b| a.topic.cmp(&b.topic).then_with(|| a.field.cmp(&b.field)));
+
     Ok(analysis)
 }
 
@@ -738,5 +917,67 @@ mod tests {
         assert!(!analysis.flight_modes.is_empty());
         // Should have GPS quality data
         assert!(analysis.gps_quality.max_satellites.is_some());
+    }
+
+    #[test]
+    fn test_field_stats_populated() {
+        let path = px4_ulog_fixture("sample.ulg");
+        let meta = extract_metadata(&path).unwrap();
+        let analysis = analyze(&path, &meta).unwrap();
+
+        // Should have field stats for multiple topics
+        assert!(
+            !analysis.field_stats.is_empty(),
+            "field_stats should not be empty"
+        );
+
+        // Check we have stats from multiple topics
+        let topics: std::collections::HashSet<&str> =
+            analysis.field_stats.iter().map(|fs| fs.field.as_str()).collect();
+        assert!(topics.len() > 1, "should have stats for multiple fields");
+
+        // All stats should have valid values
+        for fs in &analysis.field_stats {
+            assert!(fs.count > 0, "count should be > 0 for {}.{}", fs.topic, fs.field);
+            assert!(fs.min <= fs.max, "min should be <= max for {}.{}", fs.topic, fs.field);
+            assert!(fs.mean >= fs.min && fs.mean <= fs.max,
+                "mean should be between min and max for {}.{}", fs.topic, fs.field);
+        }
+    }
+
+    #[test]
+    fn test_field_stats_fixed_wing() {
+        let path = px4_ulog_fixture("fixed_wing_gps.ulg");
+        let meta = extract_metadata(&path).unwrap();
+        let analysis = analyze(&path, &meta).unwrap();
+
+        // Should have field stats
+        assert!(
+            !analysis.field_stats.is_empty(),
+            "field_stats should not be empty for fixed_wing_gps"
+        );
+
+        // Check that known topics are represented
+        let topic_names: std::collections::HashSet<&str> =
+            analysis.field_stats.iter().map(|fs| fs.topic.as_str()).collect();
+        assert!(
+            topic_names.contains("vehicle_attitude"),
+            "should have vehicle_attitude stats"
+        );
+
+        // Verify at most MAX_FIELDS_PER_TOPIC fields per topic
+        let mut topic_field_counts: std::collections::HashMap<&str, usize> =
+            std::collections::HashMap::new();
+        for fs in &analysis.field_stats {
+            *topic_field_counts.entry(fs.topic.as_str()).or_insert(0) += 1;
+        }
+        for (topic, count) in &topic_field_counts {
+            assert!(
+                *count <= 10,
+                "topic {} has {} fields, expected <= 10",
+                topic,
+                count
+            );
+        }
     }
 }

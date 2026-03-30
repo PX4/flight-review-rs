@@ -100,6 +100,21 @@ CREATE TABLE IF NOT EXISTS log_errors (
 );
 CREATE INDEX IF NOT EXISTS idx_log_errors_log ON log_errors(log_id);
 CREATE INDEX IF NOT EXISTS idx_log_errors_level ON log_errors(level);
+
+CREATE TABLE IF NOT EXISTS log_field_stats (
+    log_id TEXT NOT NULL,
+    topic TEXT NOT NULL,
+    field TEXT NOT NULL,
+    min_val REAL,
+    max_val REAL,
+    mean_val REAL,
+    count INTEGER,
+    PRIMARY KEY (log_id, topic, field),
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field ON log_field_stats(topic, field);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_max ON log_field_stats(topic, field, max_val);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_min ON log_field_stats(topic, field, min_val);
 "#;
 
 #[cfg(feature = "sqlite")]
@@ -441,6 +456,36 @@ impl LogStore for SqliteStore {
             bind_values.push(format!("%{}%", err_msg));
         }
 
+        // Field stats filters
+        if let Some(ref fm) = filters.field_max {
+            if let Some((topic_field, val_str)) = fm.split_once(':') {
+                if let Some((topic, field)) = topic_field.split_once('.') {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        conditions.push(
+                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND max_val >= ?)".to_string(),
+                        );
+                        bind_values.push(topic.to_string());
+                        bind_values.push(field.to_string());
+                        bind_values.push(val.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(ref fm) = filters.field_min {
+            if let Some((topic_field, val_str)) = fm.split_once(':') {
+                if let Some((topic, field)) = topic_field.split_once('.') {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        conditions.push(
+                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND min_val <= ?)".to_string(),
+                        );
+                        bind_values.push(topic.to_string());
+                        bind_values.push(field.to_string());
+                        bind_values.push(val.to_string());
+                    }
+                }
+            }
+        }
+
         // Geographic bounding box filter
         if let (Some(lat), Some(lon), Some(radius)) = (filters.lat, filters.lon, filters.radius_km) {
             let (min_lat, max_lat, min_lon, max_lon) = super::bounding_box(lat, lon, radius);
@@ -687,12 +732,33 @@ impl LogStore for SqliteStore {
         Ok(())
     }
 
+    async fn insert_field_stats(&self, log_id: Uuid, stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for s in stats {
+            sqlx::query(
+                "INSERT OR REPLACE INTO log_field_stats (log_id, topic, field, min_val, max_val, mean_val, count) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+                .bind(&id_str)
+                .bind(&s.topic)
+                .bind(&s.field)
+                .bind(s.min_val)
+                .bind(s.max_val)
+                .bind(s.mean_val)
+                .bind(s.count)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         sqlx::query("DELETE FROM log_parameters WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_topics WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_tags WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_errors WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_field_stats WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         Ok(())
     }
 }
@@ -758,6 +824,12 @@ impl super::LogStore for SqliteStore {
     }
 
     async fn insert_errors(&self, _log_id: uuid::Uuid, _errors: &[(String, String, Option<u64>)]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_field_stats(&self, _log_id: uuid::Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))

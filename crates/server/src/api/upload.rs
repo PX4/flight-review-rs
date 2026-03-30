@@ -165,6 +165,23 @@ pub async fn upload(
 
     state.db.insert(&record).await?;
 
+    // Insert field stats from analysis
+    if let Some(ref analysis) = result.metadata.analysis {
+        let field_stats: Vec<crate::db::FieldStatRecord> = analysis
+            .field_stats
+            .iter()
+            .map(|fs| crate::db::FieldStatRecord {
+                topic: fs.topic.clone(),
+                field: fs.field.clone(),
+                min_val: fs.min,
+                max_val: fs.max,
+                mean_val: fs.mean,
+                count: fs.count as i64,
+            })
+            .collect();
+        state.db.insert_field_stats(log_id, &field_stats).await?;
+    }
+
     // 7. Temp files cleaned up when tmp_dir is dropped
 
     tracing::info!(

@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS log_errors (
 );
 CREATE INDEX IF NOT EXISTS idx_log_errors_log ON log_errors(log_id);
 CREATE INDEX IF NOT EXISTS idx_log_errors_level ON log_errors(level);
+
+CREATE TABLE IF NOT EXISTS log_field_stats (
+    log_id UUID NOT NULL,
+    topic TEXT NOT NULL,
+    field TEXT NOT NULL,
+    min_val DOUBLE PRECISION,
+    max_val DOUBLE PRECISION,
+    mean_val DOUBLE PRECISION,
+    count BIGINT,
+    PRIMARY KEY (log_id, topic, field),
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field ON log_field_stats(topic, field);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_max ON log_field_stats(topic, field, max_val);
+CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_min ON log_field_stats(topic, field, min_val);
 "#;
 
 #[cfg(feature = "postgres")]
@@ -437,6 +452,40 @@ impl LogStore for PostgresStore {
             param_idx += 1;
         }
 
+        // Field stats filters
+        if let Some(ref fm) = filters.field_max {
+            if let Some((topic_field, val_str)) = fm.split_once(':') {
+                if let Some((topic, field)) = topic_field.split_once('.') {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        conditions.push(format!(
+                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ${} AND field = ${} AND max_val >= ${})",
+                            param_idx, param_idx + 1, param_idx + 2
+                        ));
+                        bind_values.push(topic.to_string());
+                        bind_values.push(field.to_string());
+                        bind_values.push(val.to_string());
+                        param_idx += 3;
+                    }
+                }
+            }
+        }
+        if let Some(ref fm) = filters.field_min {
+            if let Some((topic_field, val_str)) = fm.split_once(':') {
+                if let Some((topic, field)) = topic_field.split_once('.') {
+                    if let Ok(val) = val_str.parse::<f64>() {
+                        conditions.push(format!(
+                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ${} AND field = ${} AND min_val <= ${})",
+                            param_idx, param_idx + 1, param_idx + 2
+                        ));
+                        bind_values.push(topic.to_string());
+                        bind_values.push(field.to_string());
+                        bind_values.push(val.to_string());
+                        param_idx += 3;
+                    }
+                }
+            }
+        }
+
         // Geographic filter: bounding box pre-filter + haversine for exact radius
         if let (Some(lat), Some(lon), Some(radius)) = (filters.lat, filters.lon, filters.radius_km) {
             let (min_lat, max_lat, min_lon, max_lon) = super::bounding_box(lat, lon, radius);
@@ -712,11 +761,34 @@ impl LogStore for PostgresStore {
         Ok(())
     }
 
+    async fn insert_field_stats(&self, log_id: Uuid, stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+        for s in stats {
+            sqlx::query(
+                "INSERT INTO log_field_stats (log_id, topic, field, min_val, max_val, mean_val, count) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 ON CONFLICT (log_id, topic, field) DO UPDATE SET \
+                 min_val = EXCLUDED.min_val, max_val = EXCLUDED.max_val, \
+                 mean_val = EXCLUDED.mean_val, count = EXCLUDED.count"
+            )
+                .bind(log_id)
+                .bind(&s.topic)
+                .bind(&s.field)
+                .bind(s.min_val)
+                .bind(s.max_val)
+                .bind(s.mean_val)
+                .bind(s.count)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
         sqlx::query("DELETE FROM log_parameters WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_topics WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_tags WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_errors WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_field_stats WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         Ok(())
     }
 }
@@ -779,6 +851,12 @@ impl LogStore for PostgresStore {
     }
 
     async fn insert_errors(&self, _log_id: Uuid, _errors: &[(String, String, Option<u64>)]) -> Result<(), DbError> {
+        Err(DbError::Sqlx(sqlx::Error::Configuration(
+            "postgres feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_field_stats(&self, _log_id: Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))

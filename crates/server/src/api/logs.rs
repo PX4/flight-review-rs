@@ -254,6 +254,23 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
         state.db.update(id, &record).await?;
     }
 
+    // Insert field stats from analysis
+    if let Some(ref analysis) = result.metadata.analysis {
+        let field_stats: Vec<crate::db::FieldStatRecord> = analysis
+            .field_stats
+            .iter()
+            .map(|fs| crate::db::FieldStatRecord {
+                topic: fs.topic.clone(),
+                field: fs.field.clone(),
+                min_val: fs.min,
+                max_val: fs.max,
+                mean_val: fs.mean,
+                count: fs.count as i64,
+            })
+            .collect();
+        state.db.insert_field_stats(id, &field_stats).await?;
+    }
+
     tracing::info!(
         log_id = %id,
         topics = result.metadata.topics.len(),
