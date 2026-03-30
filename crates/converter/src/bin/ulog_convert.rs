@@ -22,6 +22,10 @@ struct Cli {
     #[arg(long)]
     metadata_only: bool,
 
+    /// Run PID step response analysis and output as JSON
+    #[arg(long)]
+    pid_analysis: bool,
+
     /// JSON output format for metadata.json
     #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
     output_format: OutputFormat,
@@ -39,6 +43,24 @@ fn serialize_metadata(
 
 fn main() {
     let cli = Cli::parse();
+
+    if cli.pid_analysis {
+        let result = match flight_review::pid_analysis::pid_analysis(&cli.input) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("error: {}", e);
+                std::process::exit(1);
+            }
+        };
+        let json = match &cli.output_format {
+            OutputFormat::Pretty => serde_json::to_string_pretty(&result).unwrap(),
+            OutputFormat::Compact => serde_json::to_string(&result).unwrap(),
+        };
+        println!("{}", json);
+        if !cli.metadata_only {
+            return;
+        }
+    }
 
     if cli.metadata_only {
         let mut metadata = match flight_review::metadata::extract_metadata(&cli.input) {
