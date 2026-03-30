@@ -1,0 +1,43 @@
+name: Docker
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: flight-review:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify binaries exist in image
+        run: |
+          docker create --name test-container flight-review:test
+          docker cp test-container:/usr/local/bin/flight-review-server /tmp/flight-review-server
+          docker cp test-container:/usr/local/bin/ulog-convert /tmp/ulog-convert
+          docker rm test-container
+          file /tmp/flight-review-server
+          file /tmp/ulog-convert
+
+      - name: Verify server starts
+        run: |
+          docker run -d --name fr-test -p 9090:8080 flight-review:test
+          sleep 3
+          curl -sf http://localhost:9090/health | grep -q ok
+          docker stop fr-test
+          docker rm fr-test

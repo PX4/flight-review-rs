@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests (all crates)
+        run: cargo test --workspace
+
+      - name: Check server (SQLite, default)
+        run: cargo check -p flight-review-server
+
+      - name: Check server (Postgres)
+        run: cargo check -p flight-review-server --features postgres --no-default-features
+
+      - name: Check server (all features)
+        run: cargo check -p flight-review-server --features "postgres,s3"
+
+      - name: Clippy
+        run: cargo clippy --workspace -- -D warnings
+
+  integration:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release
+        run: cargo build --release -p flight-review-server -p flight-review
+
+      - name: Run integration test
+        run: cargo test -p flight-review-server --test integration -- --nocapture
