@@ -147,6 +147,18 @@ pub async fn upload(
         tags,
         location_name,
         mission_type,
+        // Search fields — populated by extract_search_fields in commit 5
+        sys_uuid: None,
+        ver_sw: None,
+        vehicle_type: None,
+        localization_sources: None,
+        vibration_status: None,
+        battery_min_voltage: None,
+        gps_max_eph: None,
+        max_speed_m_s: None,
+        total_distance_m: None,
+        error_count: None,
+        warning_count: None,
     };
 
     state.db.insert(&record).await?;

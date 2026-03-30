@@ -279,6 +279,18 @@ async fn run_migrate(config: MigrateConfig) {
             tags: None,
             location_name: None,
             mission_type: None,
+            // Search fields — not available during v1 import
+            sys_uuid: None,
+            ver_sw: None,
+            vehicle_type: None,
+            localization_sources: None,
+            vibration_status: None,
+            battery_min_voltage: None,
+            gps_max_eph: None,
+            max_speed_m_s: None,
+            total_distance_m: None,
+            error_count: None,
+            warning_count: None,
         };
 
         match v2_db.insert(&record).await {
