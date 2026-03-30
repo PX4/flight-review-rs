@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS logs (
     flight_duration_s REAL,
     topic_count INTEGER NOT NULL DEFAULT 0,
     lat REAL,
-    lon REAL
+    lon REAL,
+    is_public INTEGER NOT NULL DEFAULT 0,
+    delete_token TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_logs_sys_name ON logs(sys_name);
@@ -82,6 +84,8 @@ fn row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<LogRecord, sqlx::Error
         })
         .unwrap_or_default();
 
+    let is_public_int: i32 = row.try_get("is_public")?;
+
     Ok(LogRecord {
         id,
         filename: row.try_get("filename")?,
@@ -94,6 +98,8 @@ fn row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<LogRecord, sqlx::Error
         topic_count: row.try_get("topic_count")?,
         lat: row.try_get("lat")?,
         lon: row.try_get("lon")?,
+        is_public: is_public_int != 0,
+        delete_token: row.try_get("delete_token")?,
     })
 }
 
@@ -106,8 +112,8 @@ impl LogStore for SqliteStore {
 
         sqlx::query(
             "INSERT INTO logs (id, filename, created_at, file_size, sys_name, ver_hw, \
-             ver_sw_release_str, flight_duration_s, topic_count, lat, lon) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ver_sw_release_str, flight_duration_s, topic_count, lat, lon, is_public, delete_token) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&record.filename)
@@ -120,6 +126,8 @@ impl LogStore for SqliteStore {
         .bind(record.topic_count)
         .bind(record.lat)
         .bind(record.lon)
+        .bind(record.is_public as i32)
+        .bind(&record.delete_token)
         .execute(&self.pool)
         .await?;
 
@@ -142,6 +150,11 @@ impl LogStore for SqliteStore {
     async fn list(&self, filters: &ListFilters) -> Result<ListResponse, DbError> {
         let mut conditions = Vec::new();
         let mut bind_values: Vec<String> = Vec::new();
+
+        // By default only return public logs
+        if !filters.include_private.unwrap_or(false) {
+            conditions.push("is_public = 1".to_string());
+        }
 
         if let Some(ref sys_name) = filters.sys_name {
             conditions.push("sys_name = ?".to_string());

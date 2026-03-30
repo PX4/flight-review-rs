@@ -19,7 +19,9 @@ CREATE TABLE IF NOT EXISTS logs (
     flight_duration_s DOUBLE PRECISION,
     topic_count INTEGER NOT NULL DEFAULT 0,
     lat DOUBLE PRECISION,
-    lon DOUBLE PRECISION
+    lon DOUBLE PRECISION,
+    is_public BOOLEAN NOT NULL DEFAULT false,
+    delete_token TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_logs_sys_name ON logs(sys_name);
@@ -73,6 +75,8 @@ fn row_to_record(row: &sqlx::postgres::PgRow) -> Result<LogRecord, sqlx::Error> 
         topic_count: row.try_get("topic_count")?,
         lat: row.try_get("lat")?,
         lon: row.try_get("lon")?,
+        is_public: row.try_get("is_public")?,
+        delete_token: row.try_get("delete_token")?,
     })
 }
 
@@ -82,8 +86,8 @@ impl LogStore for PostgresStore {
     async fn insert(&self, record: &LogRecord) -> Result<(), DbError> {
         sqlx::query(
             "INSERT INTO logs (id, filename, created_at, file_size, sys_name, ver_hw, \
-             ver_sw_release_str, flight_duration_s, topic_count, lat, lon) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+             ver_sw_release_str, flight_duration_s, topic_count, lat, lon, is_public, delete_token) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(record.id)
         .bind(&record.filename)
@@ -96,6 +100,8 @@ impl LogStore for PostgresStore {
         .bind(record.topic_count)
         .bind(record.lat)
         .bind(record.lon)
+        .bind(record.is_public)
+        .bind(&record.delete_token)
         .execute(&self.pool)
         .await?;
 
@@ -122,6 +128,11 @@ impl LogStore for PostgresStore {
         // Since sqlx doesn't support heterogeneous bind lists easily with dynamic queries,
         // we collect string values and bind them in order.
         let mut bind_values: Vec<String> = Vec::new();
+
+        // By default only return public logs
+        if !filters.include_private.unwrap_or(false) {
+            conditions.push("is_public = true".to_string());
+        }
 
         if let Some(ref sys_name) = filters.sys_name {
             conditions.push(format!("sys_name = ${}", param_idx));

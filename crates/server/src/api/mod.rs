@@ -9,6 +9,7 @@ use crate::storage::StorageError;
 
 pub enum ApiError {
     NotFound,
+    Forbidden,
     BadRequest(String),
     Internal(String),
 }
@@ -17,6 +18,7 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match self {
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".to_string()),
+            ApiError::Forbidden => (StatusCode::FORBIDDEN, "invalid token".to_string()),
             ApiError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg),
             ApiError::Internal(msg) => {
                 tracing::error!("internal error: {msg}");

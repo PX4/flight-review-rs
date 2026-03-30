@@ -4,6 +4,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -29,11 +30,26 @@ pub async fn get_log(
     }
 }
 
-/// DELETE /api/logs/:id
+#[derive(Deserialize)]
+pub struct DeleteParams {
+    pub token: String,
+}
+
+/// DELETE /api/logs/:id?token=<delete_token>
 pub async fn delete_log(
     State(state): State<Arc<crate::AppState>>,
     Path(id): Path<Uuid>,
+    Query(params): Query<DeleteParams>,
 ) -> Result<StatusCode, ApiError> {
+    // Look up the log
+    let record = state.db.get(id).await?.ok_or(ApiError::NotFound)?;
+
+    // Verify token
+    if record.delete_token != params.token {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Proceed with delete
     state.storage.delete_log_files(id).await?;
     state.db.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)

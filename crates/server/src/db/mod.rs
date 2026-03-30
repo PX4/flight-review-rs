@@ -25,6 +25,11 @@ pub struct LogRecord {
     pub lat: Option<f64>,
     /// GPS first-fix longitude
     pub lon: Option<f64>,
+    /// Whether this log appears in public listings
+    pub is_public: bool,
+    /// Delete token (32-char hex). Required to delete a log.
+    #[serde(skip_serializing)]
+    pub delete_token: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -34,6 +39,8 @@ pub struct ListFilters {
     pub search: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
+    /// If true, include private logs in results (default: only public)
+    pub include_private: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]

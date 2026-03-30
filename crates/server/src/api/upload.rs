@@ -9,8 +9,9 @@ pub async fn upload(
     State(state): State<Arc<crate::AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    // 1. Extract the file from multipart (field name "file")
+    // 1. Extract the file and optional fields from multipart
     let mut file_bytes: Option<(String, Bytes)> = None;
+    let mut is_public = false;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -26,7 +27,9 @@ pub async fn upload(
                 .await
                 .map_err(|e| ApiError::BadRequest(format!("failed to read file field: {e}")))?;
             file_bytes = Some((filename, data));
-            break;
+        } else if field.name() == Some("is_public") {
+            let val = field.text().await.unwrap_or_default();
+            is_public = val == "true" || val == "1";
         }
     }
 
@@ -78,6 +81,7 @@ pub async fn upload(
         .await?;
 
     // 6. Create a LogRecord from the metadata and insert into DB
+    let delete_token = Uuid::new_v4().simple().to_string();
     let record = crate::db::LogRecord {
         id: log_id,
         filename: original_filename,
@@ -90,6 +94,8 @@ pub async fn upload(
         topic_count: result.metadata.topics.len() as i32,
         lat: result.metadata.gps_first_fix.as_ref().map(|g| g.lat_deg),
         lon: result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg),
+        is_public,
+        delete_token: delete_token.clone(),
     };
 
     state.db.insert(&record).await?;
@@ -112,6 +118,8 @@ pub async fn upload(
         "ver_hw": record.ver_hw,
         "flight_duration_s": record.flight_duration_s,
         "topic_count": record.topic_count,
+        "is_public": is_public,
+        "delete_token": delete_token,
         "parquet_files": result.parquet_files.iter()
             .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
             .collect::<Vec<_>>(),
