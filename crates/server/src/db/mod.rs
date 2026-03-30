@@ -48,7 +48,7 @@ impl QueryBuilder {
     }
 
     /// Next placeholder string: `?` for SQLite, `$N` for Postgres.
-    fn next_param(&mut self) -> String {
+    pub fn next_param(&mut self) -> String {
         self.param_counter += 1;
         match self.style {
             ParamStyle::Placeholder => "?".to_string(),
@@ -67,6 +67,13 @@ impl QueryBuilder {
     pub fn add_like(&mut self, column: &str, pattern: String) {
         let p = self.next_param();
         self.conditions.push(format!("{column} LIKE {p}"));
+        self.bind_values.push(BindValue::Str(pattern));
+    }
+
+    /// Add ILIKE condition (Postgres): `column ILIKE <placeholder>`.
+    pub fn add_ilike(&mut self, column: &str, pattern: String) {
+        let p = self.next_param();
+        self.conditions.push(format!("{column} ILIKE {p}"));
         self.bind_values.push(BindValue::Str(pattern));
     }
 
@@ -192,6 +199,7 @@ pub struct LogRecord {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListFilters {
+    // Existing filters
     pub sys_name: Option<String>,
     pub ver_hw: Option<String>,
     pub search: Option<String>,
@@ -199,12 +207,96 @@ pub struct ListFilters {
     pub limit: Option<i64>,
     /// If true, include private logs in results (default: only public)
     pub include_private: Option<bool>,
+
+    // Phase 1 search filters
+    /// ISO-8601 date string lower bound on created_at
+    pub date_from: Option<String>,
+    /// ISO-8601 date string upper bound on created_at
+    pub date_to: Option<String>,
+    /// Minimum flight duration in seconds
+    pub flight_duration_min: Option<f64>,
+    /// Maximum flight duration in seconds
+    pub flight_duration_max: Option<f64>,
+    /// Filter by software release version string (prefix match)
+    pub ver_sw_release_str: Option<String>,
+    /// Filter by software git hash (exact match)
+    pub ver_sw: Option<String>,
+    /// Filter by system UUID (exact match)
+    pub sys_uuid: Option<String>,
+    /// Filter by vehicle type category (exact match)
+    pub vehicle_type: Option<String>,
+    /// Filter by localization source (substring match)
+    pub localization: Option<String>,
+    /// Filter by vibration status (exact match)
+    pub vibration_status: Option<String>,
+    /// Filter by GPS presence (lat IS NOT NULL)
+    pub has_gps: Option<bool>,
+    /// Sort column and direction, e.g. "created_at:desc", "flight_duration_s:asc"
+    pub sort: Option<String>,
+
+    // Junction table / geo filters
+    /// Filter logs that contain this topic name
+    pub has_topic: Option<String>,
+    /// Filter by parameter "name:value" (e.g. "EKF2_AID_MASK:24")
+    pub parameter: Option<String>,
+    /// Filter by tag
+    pub tag: Option<String>,
+    /// Filter by error message substring
+    pub error_message: Option<String>,
+    /// Center latitude for geographic search
+    pub lat: Option<f64>,
+    /// Center longitude for geographic search
+    pub lon: Option<f64>,
+    /// Radius in km for geographic search
+    pub radius_km: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ListResponse {
     pub logs: Vec<LogRecord>,
     pub total: i64,
+}
+
+// ---------------------------------------------------------------------------
+// StatsParams / StatRow – used by the aggregation endpoint
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatsParams {
+    /// Column to group by (validated against allowlist in the handler).
+    pub group_by: String,
+    /// Time period: "7d", "30d", "90d", "1y", "all".
+    pub period: Option<String>,
+    /// Maximum number of groups to return.
+    pub limit: Option<i64>,
+    // Optional filters (subset of ListFilters).
+    pub vehicle_type: Option<String>,
+    pub ver_hw: Option<String>,
+    pub ver_sw_release_str: Option<String>,
+    pub source: Option<String>,
+    pub vibration_status: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct StatRow {
+    pub group: String,
+    pub count: i64,
+    pub avg_flight_duration_s: Option<f64>,
+    pub total_flight_hours: Option<f64>,
+    pub avg_max_speed: Option<f64>,
+}
+
+/// Parse a period string into a number of days. Returns `None` for "all".
+pub fn period_to_days(period: Option<&str>) -> Option<i64> {
+    match period {
+        None => Some(30),
+        Some("all") => None,
+        Some("7d") => Some(7),
+        Some("30d") => Some(30),
+        Some("90d") => Some(90),
+        Some("1y") => Some(365),
+        Some(_) => Some(30),
+    }
 }
 
 #[async_trait::async_trait]
@@ -214,6 +306,16 @@ pub trait LogStore: Send + Sync {
     async fn list(&self, filters: &ListFilters) -> Result<ListResponse, DbError>;
     async fn delete(&self, id: Uuid) -> Result<bool, DbError>;
     async fn update(&self, id: Uuid, record: &LogRecord) -> Result<(), DbError>;
+
+    // Aggregation
+    async fn stats(&self, params: &StatsParams) -> Result<Vec<StatRow>, DbError>;
+
+    // Junction table methods
+    async fn insert_parameters(&self, log_id: Uuid, params: &[(String, f64)]) -> Result<(), DbError>;
+    async fn insert_topics(&self, log_id: Uuid, topics: &[(String, i32)]) -> Result<(), DbError>;
+    async fn insert_tags(&self, log_id: Uuid, tags: &[String]) -> Result<(), DbError>;
+    async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError>;
+    async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError>;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -222,6 +324,19 @@ pub enum DbError {
     Sqlx(#[from] sqlx::Error),
     #[error("migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
+}
+
+/// Compute a lat/lon bounding box from a center point and radius in km.
+/// Returns (min_lat, max_lat, min_lon, max_lon).
+pub fn bounding_box(lat: f64, lon: f64, radius_km: f64) -> (f64, f64, f64, f64) {
+    let lat_delta = radius_km / 111.32; // 1 degree lat ~ 111.32 km
+    let cos_lat = lat.to_radians().cos();
+    let lon_delta = if cos_lat.abs() < 1e-10 {
+        180.0 // near poles, use full longitude range
+    } else {
+        radius_km / (111.32 * cos_lat)
+    };
+    (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta)
 }
 
 pub async fn create_db(url: &str) -> Result<Arc<dyn LogStore>, DbError> {

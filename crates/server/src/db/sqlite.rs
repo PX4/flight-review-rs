@@ -1,5 +1,5 @@
 #[cfg(feature = "sqlite")]
-use super::{DbError, ListFilters, ListResponse, LogRecord, LogStore};
+use super::{period_to_days, DbError, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams};
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sqlite")]
@@ -62,6 +62,47 @@ CREATE INDEX IF NOT EXISTS idx_logs_lat_lon ON logs(lat, lon);
 "#;
 
 #[cfg(feature = "sqlite")]
+const CREATE_JUNCTION_TABLES: &str = r#"
+CREATE TABLE IF NOT EXISTS log_parameters (
+    log_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value REAL NOT NULL,
+    PRIMARY KEY (log_id, name),
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_params_name ON log_parameters(name);
+CREATE INDEX IF NOT EXISTS idx_log_params_name_val ON log_parameters(name, value);
+
+CREATE TABLE IF NOT EXISTS log_topics (
+    log_id TEXT NOT NULL,
+    topic_name TEXT NOT NULL,
+    message_count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (log_id, topic_name),
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_topics_topic ON log_topics(topic_name);
+
+CREATE TABLE IF NOT EXISTS log_tags (
+    log_id TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (log_id, tag),
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_tags_tag ON log_tags(tag);
+
+CREATE TABLE IF NOT EXISTS log_errors (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id TEXT NOT NULL,
+    level TEXT NOT NULL,
+    message TEXT NOT NULL,
+    timestamp_us INTEGER,
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_errors_log ON log_errors(log_id);
+CREATE INDEX IF NOT EXISTS idx_log_errors_level ON log_errors(level);
+"#;
+
+#[cfg(feature = "sqlite")]
 const ALTER_COLUMNS: &[&str] = &[
     "ALTER TABLE logs ADD COLUMN sys_uuid TEXT",
     "ALTER TABLE logs ADD COLUMN ver_sw TEXT",
@@ -95,7 +136,13 @@ impl SqliteStore {
             .connect_with(opts)
             .await?;
 
+        // Enable foreign key support for cascade deletes.
+        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+
         sqlx::query(CREATE_TABLE).execute(&pool).await?;
+
+        // Create junction tables for parameters, topics, tags, errors.
+        sqlx::query(CREATE_JUNCTION_TABLES).execute(&pool).await?;
 
         // Migrate: add new columns to existing tables (idempotent).
         for col_sql in ALTER_COLUMNS {
@@ -187,6 +234,32 @@ fn row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<LogRecord, sqlx::Error
         error_count: row.try_get("error_count")?,
         warning_count: row.try_get("warning_count")?,
     })
+}
+
+/// Parse a sort specification like "created_at:desc" into a safe ORDER BY clause.
+#[cfg(feature = "sqlite")]
+fn parse_sort(sort: Option<&str>) -> String {
+    const ALLOWED: &[&str] = &[
+        "created_at",
+        "flight_duration_s",
+        "file_size",
+        "max_speed_m_s",
+        "total_distance_m",
+        "battery_min_voltage",
+    ];
+    match sort {
+        Some(s) => {
+            let mut parts = s.splitn(2, ':');
+            let col = parts.next().unwrap_or("created_at");
+            let dir = parts.next().unwrap_or("desc");
+            if !ALLOWED.contains(&col) {
+                return "created_at DESC".to_string();
+            }
+            let dir = if dir == "asc" { "ASC" } else { "DESC" };
+            format!("{} {}", col, dir)
+        }
+        None => "created_at DESC".to_string(),
+    }
 }
 
 #[cfg(feature = "sqlite")]
@@ -288,11 +361,105 @@ impl LogStore for SqliteStore {
             bind_values.push(pattern);
         }
 
+        // Phase 1 search filters
+        if let Some(ref date_from) = filters.date_from {
+            conditions.push("created_at >= ?".to_string());
+            bind_values.push(date_from.clone());
+        }
+        if let Some(ref date_to) = filters.date_to {
+            conditions.push("created_at <= ?".to_string());
+            bind_values.push(date_to.clone());
+        }
+        if let Some(min) = filters.flight_duration_min {
+            conditions.push("flight_duration_s >= ?".to_string());
+            bind_values.push(min.to_string());
+        }
+        if let Some(max) = filters.flight_duration_max {
+            conditions.push("flight_duration_s <= ?".to_string());
+            bind_values.push(max.to_string());
+        }
+        if let Some(ref v) = filters.ver_sw_release_str {
+            conditions.push("ver_sw_release_str LIKE ?".to_string());
+            bind_values.push(format!("{}%", v));
+        }
+        if let Some(ref v) = filters.ver_sw {
+            conditions.push("ver_sw = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = filters.sys_uuid {
+            conditions.push("sys_uuid = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = filters.vehicle_type {
+            conditions.push("vehicle_type = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = filters.localization {
+            conditions.push("localization_sources LIKE ?".to_string());
+            bind_values.push(format!("%{}%", v));
+        }
+        if let Some(ref v) = filters.vibration_status {
+            conditions.push("vibration_status = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(has) = filters.has_gps {
+            if has {
+                conditions.push("lat IS NOT NULL".to_string());
+            } else {
+                conditions.push("lat IS NULL".to_string());
+            }
+        }
+
+        // Junction table filters
+        if let Some(ref topic) = filters.has_topic {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM log_topics WHERE log_id = logs.id AND topic_name = ?)".to_string(),
+            );
+            bind_values.push(topic.clone());
+        }
+        if let Some(ref param_str) = filters.parameter {
+            if let Some((name, value_str)) = param_str.split_once(':') {
+                if let Ok(value) = value_str.parse::<f64>() {
+                    conditions.push(
+                        "EXISTS (SELECT 1 FROM log_parameters WHERE log_id = logs.id AND name = ? AND value = ?)".to_string(),
+                    );
+                    bind_values.push(name.to_string());
+                    bind_values.push(value.to_string());
+                }
+            }
+        }
+        if let Some(ref tag) = filters.tag {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM log_tags WHERE log_id = logs.id AND tag = ?)".to_string(),
+            );
+            bind_values.push(tag.clone());
+        }
+        if let Some(ref err_msg) = filters.error_message {
+            conditions.push(
+                "EXISTS (SELECT 1 FROM log_errors WHERE log_id = logs.id AND message LIKE ?)".to_string(),
+            );
+            bind_values.push(format!("%{}%", err_msg));
+        }
+
+        // Geographic bounding box filter
+        if let (Some(lat), Some(lon), Some(radius)) = (filters.lat, filters.lon, filters.radius_km) {
+            let (min_lat, max_lat, min_lon, max_lon) = super::bounding_box(lat, lon, radius);
+            conditions.push("lat BETWEEN ? AND ?".to_string());
+            bind_values.push(min_lat.to_string());
+            bind_values.push(max_lat.to_string());
+            conditions.push("lon BETWEEN ? AND ?".to_string());
+            bind_values.push(min_lon.to_string());
+            bind_values.push(max_lon.to_string());
+        }
+
         let where_clause = if conditions.is_empty() {
             String::new()
         } else {
             format!("WHERE {}", conditions.join(" AND "))
         };
+
+        // Sort
+        let order_by = parse_sort(filters.sort.as_deref());
 
         // Count query
         let count_sql = format!("SELECT COUNT(*) as cnt FROM logs {}", where_clause);
@@ -307,8 +474,8 @@ impl LogStore for SqliteStore {
         let limit = filters.limit.unwrap_or(50);
         let offset = filters.offset.unwrap_or(0);
         let data_sql = format!(
-            "SELECT * FROM logs {} ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            where_clause
+            "SELECT * FROM logs {} ORDER BY {} LIMIT ? OFFSET ?",
+            where_clause, order_by
         );
         let mut data_query = sqlx::query(&data_sql);
         for v in &bind_values {
@@ -390,6 +557,144 @@ impl LogStore for SqliteStore {
 
         Ok(())
     }
+
+    async fn stats(&self, params: &StatsParams) -> Result<Vec<StatRow>, DbError> {
+        let group_col = &params.group_by; // Already validated by handler
+
+        // Build WHERE clause
+        let mut conditions = vec!["is_public = 1".to_string()];
+        let mut bind_values: Vec<String> = Vec::new();
+
+        // Period filter
+        if let Some(days) = period_to_days(params.period.as_deref()) {
+            conditions.push(format!(
+                "created_at >= datetime('now', '-{} days')",
+                days
+            ));
+        }
+
+        // Optional filters
+        if let Some(ref v) = params.vehicle_type {
+            conditions.push("vehicle_type = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = params.ver_hw {
+            conditions.push("ver_hw = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = params.ver_sw_release_str {
+            conditions.push("ver_sw_release_str = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = params.source {
+            conditions.push("source = ?".to_string());
+            bind_values.push(v.clone());
+        }
+        if let Some(ref v) = params.vibration_status {
+            conditions.push("vibration_status = ?".to_string());
+            bind_values.push(v.clone());
+        }
+
+        let where_clause = format!("WHERE {}", conditions.join(" AND "));
+        let limit = params.limit.unwrap_or(50);
+
+        let sql = format!(
+            "SELECT {col} AS group_value, \
+             COUNT(*) AS count, \
+             AVG(flight_duration_s) AS avg_dur, \
+             SUM(flight_duration_s) / 3600.0 AS total_hrs, \
+             AVG(max_speed_m_s) AS avg_speed \
+             FROM logs {where_clause} \
+             AND {col} IS NOT NULL \
+             GROUP BY {col} \
+             ORDER BY count DESC \
+             LIMIT ?",
+            col = group_col,
+            where_clause = where_clause
+        );
+
+        let mut query = sqlx::query(&sql);
+        for v in &bind_values {
+            query = query.bind(v);
+        }
+        query = query.bind(limit);
+
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let data = rows
+            .iter()
+            .map(|row| StatRow {
+                group: row.try_get::<String, _>("group_value").unwrap_or_default(),
+                count: row.try_get("count").unwrap_or(0),
+                avg_flight_duration_s: row.try_get("avg_dur").ok(),
+                total_flight_hours: row.try_get("total_hrs").ok(),
+                avg_max_speed: row.try_get("avg_speed").ok(),
+            })
+            .collect();
+
+        Ok(data)
+    }
+
+    async fn insert_parameters(&self, log_id: Uuid, params: &[(String, f64)]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for (name, value) in params {
+            sqlx::query("INSERT OR REPLACE INTO log_parameters (log_id, name, value) VALUES (?, ?, ?)")
+                .bind(&id_str)
+                .bind(name)
+                .bind(value)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn insert_topics(&self, log_id: Uuid, topics: &[(String, i32)]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for (topic_name, message_count) in topics {
+            sqlx::query("INSERT OR REPLACE INTO log_topics (log_id, topic_name, message_count) VALUES (?, ?, ?)")
+                .bind(&id_str)
+                .bind(topic_name)
+                .bind(message_count)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn insert_tags(&self, log_id: Uuid, tags: &[String]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for tag in tags {
+            sqlx::query("INSERT OR REPLACE INTO log_tags (log_id, tag) VALUES (?, ?)")
+                .bind(&id_str)
+                .bind(tag)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for (level, message, timestamp_us) in errors {
+            sqlx::query("INSERT INTO log_errors (log_id, level, message, timestamp_us) VALUES (?, ?, ?, ?)")
+                .bind(&id_str)
+                .bind(level)
+                .bind(message)
+                .bind(timestamp_us.map(|t| t as i64))
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        sqlx::query("DELETE FROM log_parameters WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_topics WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_tags WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_errors WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "sqlite"))]
@@ -423,6 +728,42 @@ impl super::LogStore for SqliteStore {
     }
 
     async fn update(&self, _id: uuid::Uuid, _record: &super::LogRecord) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn stats(&self, _params: &super::StatsParams) -> Result<Vec<super::StatRow>, super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_parameters(&self, _log_id: uuid::Uuid, _params: &[(String, f64)]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_topics(&self, _log_id: uuid::Uuid, _topics: &[(String, i32)]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_tags(&self, _log_id: uuid::Uuid, _tags: &[String]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_errors(&self, _log_id: uuid::Uuid, _errors: &[(String, String, Option<u64>)]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn delete_junction_data(&self, _log_id: uuid::Uuid) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
