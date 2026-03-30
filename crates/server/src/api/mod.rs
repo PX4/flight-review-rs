@@ -1,5 +1,6 @@
 pub mod health;
 pub mod logs;
+pub mod stats;
 pub mod upload;
 
 use axum::{http::StatusCode, response::IntoResponse, Json};
