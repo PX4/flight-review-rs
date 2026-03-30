@@ -30,6 +30,28 @@ pub struct LogRecord {
     /// Delete token (32-char hex). Required to delete a log.
     #[serde(skip_serializing)]
     pub delete_token: String,
+    /// Free text description of the flight
+    pub description: Option<String>,
+    /// Wind conditions: "calm", "breeze", "gale", "storm"
+    pub wind_speed: Option<String>,
+    /// Flight quality rating 1-5
+    pub rating: Option<i32>,
+    /// Free text pilot feedback/notes
+    pub feedback: Option<String>,
+    /// Link to flight video
+    pub video_url: Option<String>,
+    /// Upload source: "web", "CI", "QGC", "API"
+    pub source: Option<String>,
+    /// Pilot name
+    pub pilot_name: Option<String>,
+    /// Vehicle name/callsign
+    pub vehicle_name: Option<String>,
+    /// Comma-separated tags
+    pub tags: Option<String>,
+    /// Human-readable location name
+    pub location_name: Option<String>,
+    /// Mission type: "survey", "inspection", "test", "recreational"
+    pub mission_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

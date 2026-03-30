@@ -165,6 +165,7 @@ async fn run_migrate(config: MigrateConfig) {
     let rows = sqlx::query(
         "SELECT \
             l.Id, l.Date, l.Description, l.OriginalFilename, l.Source, l.Public, l.Token, l.Type, \
+            l.WindSpeed, l.Rating, l.Feedback, l.VideoUrl, \
             g.Duration, g.MavType, g.Estimator, g.AutostartId, g.Hardware, g.Software, \
             g.SoftwareVersion, g.NumLoggedErrors, g.NumLoggedWarnings, g.FlightModes, \
             g.FlightModeDurations, g.UUID, g.StartTime \
@@ -244,6 +245,15 @@ async fn run_migrate(config: MigrateConfig) {
             .as_deref()
             .and_then(|s| s.parse::<f64>().ok());
 
+        // Pilot-provided context fields from v1 Logs table
+        let description: Option<String> = row.try_get("Description").ok().flatten();
+        let source: Option<String> = row.try_get("Source").ok().flatten();
+        let wind_speed: Option<String> = row.try_get("WindSpeed").ok().flatten();
+        let rating_str: Option<String> = row.try_get("Rating").ok().flatten();
+        let rating: Option<i32> = rating_str.as_deref().and_then(|s| s.parse::<i32>().ok());
+        let feedback: Option<String> = row.try_get("Feedback").ok().flatten();
+        let video_url: Option<String> = row.try_get("VideoUrl").ok().flatten();
+
         let record = db::LogRecord {
             id,
             filename,
@@ -258,6 +268,17 @@ async fn run_migrate(config: MigrateConfig) {
             lon: None,
             is_public,
             delete_token,
+            description,
+            wind_speed,
+            rating,
+            feedback,
+            video_url,
+            source,
+            pilot_name: None,
+            vehicle_name: None,
+            tags: None,
+            location_name: None,
+            mission_type: None,
         };
 
         match v2_db.insert(&record).await {

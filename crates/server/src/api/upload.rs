@@ -12,6 +12,17 @@ pub async fn upload(
     // 1. Extract the file and optional fields from multipart
     let mut file_bytes: Option<(String, Bytes)> = None;
     let mut is_public = false;
+    let mut description: Option<String> = None;
+    let mut wind_speed: Option<String> = None;
+    let mut rating: Option<i32> = None;
+    let mut feedback: Option<String> = None;
+    let mut video_url: Option<String> = None;
+    let mut source: Option<String> = None;
+    let mut pilot_name: Option<String> = None;
+    let mut vehicle_name: Option<String> = None;
+    let mut tags: Option<String> = None;
+    let mut location_name: Option<String> = None;
+    let mut mission_type: Option<String> = None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -30,6 +41,29 @@ pub async fn upload(
         } else if field.name() == Some("is_public") {
             let val = field.text().await.unwrap_or_default();
             is_public = val == "true" || val == "1";
+        } else if field.name() == Some("description") {
+            description = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("wind_speed") {
+            wind_speed = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("rating") {
+            let val = field.text().await.unwrap_or_default();
+            rating = val.parse::<i32>().ok();
+        } else if field.name() == Some("feedback") {
+            feedback = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("video_url") {
+            video_url = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("source") {
+            source = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("pilot_name") {
+            pilot_name = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("vehicle_name") {
+            vehicle_name = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("tags") {
+            tags = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("location_name") {
+            location_name = Some(field.text().await.unwrap_or_default());
+        } else if field.name() == Some("mission_type") {
+            mission_type = Some(field.text().await.unwrap_or_default());
         }
     }
 
@@ -102,6 +136,17 @@ pub async fn upload(
         lon: result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg),
         is_public,
         delete_token: delete_token.clone(),
+        description,
+        wind_speed,
+        rating,
+        feedback,
+        video_url,
+        source,
+        pilot_name,
+        vehicle_name,
+        tags,
+        location_name,
+        mission_type,
     };
 
     state.db.insert(&record).await?;

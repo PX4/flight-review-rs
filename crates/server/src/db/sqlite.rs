@@ -26,7 +26,18 @@ CREATE TABLE IF NOT EXISTS logs (
     lat REAL,
     lon REAL,
     is_public INTEGER NOT NULL DEFAULT 0,
-    delete_token TEXT NOT NULL DEFAULT ''
+    delete_token TEXT NOT NULL DEFAULT '',
+    description TEXT,
+    wind_speed TEXT,
+    rating INTEGER,
+    feedback TEXT,
+    video_url TEXT,
+    source TEXT,
+    pilot_name TEXT,
+    vehicle_name TEXT,
+    tags TEXT,
+    location_name TEXT,
+    mission_type TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_logs_sys_name ON logs(sys_name);
@@ -100,6 +111,17 @@ fn row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<LogRecord, sqlx::Error
         lon: row.try_get("lon")?,
         is_public: is_public_int != 0,
         delete_token: row.try_get("delete_token")?,
+        description: row.try_get("description")?,
+        wind_speed: row.try_get("wind_speed")?,
+        rating: row.try_get("rating")?,
+        feedback: row.try_get("feedback")?,
+        video_url: row.try_get("video_url")?,
+        source: row.try_get("source")?,
+        pilot_name: row.try_get("pilot_name")?,
+        vehicle_name: row.try_get("vehicle_name")?,
+        tags: row.try_get("tags")?,
+        location_name: row.try_get("location_name")?,
+        mission_type: row.try_get("mission_type")?,
     })
 }
 
@@ -112,8 +134,10 @@ impl LogStore for SqliteStore {
 
         sqlx::query(
             "INSERT INTO logs (id, filename, created_at, file_size, sys_name, ver_hw, \
-             ver_sw_release_str, flight_duration_s, topic_count, lat, lon, is_public, delete_token) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ver_sw_release_str, flight_duration_s, topic_count, lat, lon, is_public, delete_token, \
+             description, wind_speed, rating, feedback, video_url, source, pilot_name, \
+             vehicle_name, tags, location_name, mission_type) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&record.filename)
@@ -128,6 +152,17 @@ impl LogStore for SqliteStore {
         .bind(record.lon)
         .bind(record.is_public as i32)
         .bind(&record.delete_token)
+        .bind(&record.description)
+        .bind(&record.wind_speed)
+        .bind(record.rating)
+        .bind(&record.feedback)
+        .bind(&record.video_url)
+        .bind(&record.source)
+        .bind(&record.pilot_name)
+        .bind(&record.vehicle_name)
+        .bind(&record.tags)
+        .bind(&record.location_name)
+        .bind(&record.mission_type)
         .execute(&self.pool)
         .await?;
 
@@ -228,7 +263,9 @@ impl LogStore for SqliteStore {
         sqlx::query(
             "UPDATE logs SET filename = ?, created_at = ?, file_size = ?, sys_name = ?, ver_hw = ?, \
              ver_sw_release_str = ?, flight_duration_s = ?, topic_count = ?, lat = ?, lon = ?, \
-             is_public = ?, delete_token = ? WHERE id = ?",
+             is_public = ?, delete_token = ?, description = ?, wind_speed = ?, rating = ?, \
+             feedback = ?, video_url = ?, source = ?, pilot_name = ?, vehicle_name = ?, \
+             tags = ?, location_name = ?, mission_type = ? WHERE id = ?",
         )
         .bind(&record.filename)
         .bind(&created_at)
@@ -242,6 +279,17 @@ impl LogStore for SqliteStore {
         .bind(record.lon)
         .bind(record.is_public as i32)
         .bind(&record.delete_token)
+        .bind(&record.description)
+        .bind(&record.wind_speed)
+        .bind(record.rating)
+        .bind(&record.feedback)
+        .bind(&record.video_url)
+        .bind(&record.source)
+        .bind(&record.pilot_name)
+        .bind(&record.vehicle_name)
+        .bind(&record.tags)
+        .bind(&record.location_name)
+        .bind(&record.mission_type)
         .bind(&id_str)
         .execute(&self.pool)
         .await?;
