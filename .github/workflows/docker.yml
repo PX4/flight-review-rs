@@ -20,6 +20,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          load: true
           push: false
           tags: flight-review:test
           cache-from: type=gha
