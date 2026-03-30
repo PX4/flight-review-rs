@@ -5,6 +5,118 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
+// ---------------------------------------------------------------------------
+// QueryBuilder – abstracts `?` (SQLite) vs `$N` (Postgres) parameter style
+// ---------------------------------------------------------------------------
+
+/// Parameter placeholder style.
+#[derive(Debug, Clone, Copy)]
+pub enum ParamStyle {
+    /// SQLite-style `?` placeholders.
+    Placeholder,
+    /// Postgres-style `$1, $2, …` positional placeholders.
+    Positional,
+}
+
+/// A value that can be bound to a query parameter.
+#[derive(Debug, Clone)]
+pub enum BindValue {
+    Str(String),
+    OptStr(Option<String>),
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+/// Builds a dynamic WHERE clause with correctly-numbered placeholders.
+#[derive(Debug)]
+pub struct QueryBuilder {
+    conditions: Vec<String>,
+    bind_values: Vec<BindValue>,
+    style: ParamStyle,
+    param_counter: usize,
+}
+
+impl QueryBuilder {
+    pub fn new(style: ParamStyle) -> Self {
+        Self {
+            conditions: Vec::new(),
+            bind_values: Vec::new(),
+            style,
+            param_counter: 0,
+        }
+    }
+
+    /// Next placeholder string: `?` for SQLite, `$N` for Postgres.
+    fn next_param(&mut self) -> String {
+        self.param_counter += 1;
+        match self.style {
+            ParamStyle::Placeholder => "?".to_string(),
+            ParamStyle::Positional => format!("${}", self.param_counter),
+        }
+    }
+
+    /// Add exact-match condition: `column = <placeholder>`.
+    pub fn add_eq(&mut self, column: &str, value: BindValue) {
+        let p = self.next_param();
+        self.conditions.push(format!("{column} = {p}"));
+        self.bind_values.push(value);
+    }
+
+    /// Add LIKE condition: `column LIKE <placeholder>`.
+    pub fn add_like(&mut self, column: &str, pattern: String) {
+        let p = self.next_param();
+        self.conditions.push(format!("{column} LIKE {p}"));
+        self.bind_values.push(BindValue::Str(pattern));
+    }
+
+    /// Add `>=` condition.
+    pub fn add_gte(&mut self, column: &str, value: BindValue) {
+        let p = self.next_param();
+        self.conditions.push(format!("{column} >= {p}"));
+        self.bind_values.push(value);
+    }
+
+    /// Add `<=` condition.
+    pub fn add_lte(&mut self, column: &str, value: BindValue) {
+        let p = self.next_param();
+        self.conditions.push(format!("{column} <= {p}"));
+        self.bind_values.push(value);
+    }
+
+    /// Add `IS NULL` or `IS NOT NULL` condition (no bind value).
+    pub fn add_null(&mut self, column: &str, should_be_null: bool) {
+        if should_be_null {
+            self.conditions.push(format!("{column} IS NULL"));
+        } else {
+            self.conditions.push(format!("{column} IS NOT NULL"));
+        }
+    }
+
+    /// Add a raw SQL condition with no bind value.
+    pub fn add_raw(&mut self, condition: String) {
+        self.conditions.push(condition);
+    }
+
+    /// Build the `WHERE …` clause. Returns an empty string if there are no conditions.
+    pub fn where_clause(&self) -> String {
+        if self.conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", self.conditions.join(" AND "))
+        }
+    }
+
+    /// Ordered bind values ready for binding.
+    pub fn values(&self) -> &[BindValue] {
+        &self.bind_values
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LogRecord
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogRecord {
     pub id: Uuid,
@@ -52,6 +164,30 @@ pub struct LogRecord {
     pub location_name: Option<String>,
     /// Mission type: "survey", "inspection", "test", "recreational"
     pub mission_type: Option<String>,
+
+    // ---- search / analytics columns (populated by extract_search_fields) ----
+    /// System UUID from parameters
+    pub sys_uuid: Option<String>,
+    /// Software version tag (e.g. "v1.14.3")
+    pub ver_sw: Option<String>,
+    /// Vehicle type: "multirotor", "fixedwing", "vtol", "rover", "other"
+    pub vehicle_type: Option<String>,
+    /// Comma-separated localization sources (e.g. "gps,optical_flow,vision")
+    pub localization_sources: Option<String>,
+    /// Vibration quality: "good", "warning", "critical"
+    pub vibration_status: Option<String>,
+    /// Minimum battery cell voltage (V)
+    pub battery_min_voltage: Option<f64>,
+    /// Maximum GPS horizontal position error (m)
+    pub gps_max_eph: Option<f64>,
+    /// Maximum ground speed (m/s)
+    pub max_speed_m_s: Option<f64>,
+    /// Total distance travelled (m)
+    pub total_distance_m: Option<f64>,
+    /// Number of error-level events/messages
+    pub error_count: Option<i32>,
+    /// Number of warning-level events/messages
+    pub warning_count: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

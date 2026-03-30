@@ -32,12 +32,44 @@ CREATE TABLE IF NOT EXISTS logs (
     vehicle_name TEXT,
     tags TEXT,
     location_name TEXT,
-    mission_type TEXT
+    mission_type TEXT,
+    sys_uuid TEXT,
+    ver_sw TEXT,
+    vehicle_type TEXT,
+    localization_sources TEXT,
+    vibration_status TEXT,
+    battery_min_voltage DOUBLE PRECISION,
+    gps_max_eph DOUBLE PRECISION,
+    max_speed_m_s DOUBLE PRECISION,
+    total_distance_m DOUBLE PRECISION,
+    error_count INTEGER,
+    warning_count INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created_at ON logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_logs_sys_name ON logs(sys_name);
 CREATE INDEX IF NOT EXISTS idx_logs_ver_hw ON logs(ver_hw);
+CREATE INDEX IF NOT EXISTS idx_logs_sys_uuid ON logs(sys_uuid);
+CREATE INDEX IF NOT EXISTS idx_logs_vehicle_type ON logs(vehicle_type);
+CREATE INDEX IF NOT EXISTS idx_logs_vibration_status ON logs(vibration_status);
+CREATE INDEX IF NOT EXISTS idx_logs_ver_sw ON logs(ver_sw);
+CREATE INDEX IF NOT EXISTS idx_logs_flight_duration ON logs(flight_duration_s);
+CREATE INDEX IF NOT EXISTS idx_logs_lat_lon ON logs(lat, lon);
 "#;
+
+#[cfg(feature = "postgres")]
+const ALTER_COLUMNS: &[&str] = &[
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS sys_uuid TEXT",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS ver_sw TEXT",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS vehicle_type TEXT",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS localization_sources TEXT",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS vibration_status TEXT",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS battery_min_voltage DOUBLE PRECISION",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS gps_max_eph DOUBLE PRECISION",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS max_speed_m_s DOUBLE PRECISION",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_distance_m DOUBLE PRECISION",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_count INTEGER",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS warning_count INTEGER",
+];
 
 #[cfg(feature = "postgres")]
 pub struct PostgresStore {
@@ -58,6 +90,23 @@ impl PostgresStore {
             .await?;
 
         sqlx::query(CREATE_TABLE).execute(&pool).await?;
+
+        // Migrate: add new columns to existing tables (idempotent).
+        for col_sql in ALTER_COLUMNS {
+            sqlx::query(col_sql).execute(&pool).await?;
+        }
+
+        // Create indexes that were added after the initial schema.
+        for idx_sql in &[
+            "CREATE INDEX IF NOT EXISTS idx_logs_sys_uuid ON logs(sys_uuid)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_vehicle_type ON logs(vehicle_type)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_vibration_status ON logs(vibration_status)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_ver_sw ON logs(ver_sw)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_flight_duration ON logs(flight_duration_s)",
+            "CREATE INDEX IF NOT EXISTS idx_logs_lat_lon ON logs(lat, lon)",
+        ] {
+            sqlx::query(idx_sql).execute(&pool).await?;
+        }
 
         Ok(Self { pool })
     }
@@ -99,6 +148,17 @@ fn row_to_record(row: &sqlx::postgres::PgRow) -> Result<LogRecord, sqlx::Error> 
         tags: row.try_get("tags")?,
         location_name: row.try_get("location_name")?,
         mission_type: row.try_get("mission_type")?,
+        sys_uuid: row.try_get("sys_uuid")?,
+        ver_sw: row.try_get("ver_sw")?,
+        vehicle_type: row.try_get("vehicle_type")?,
+        localization_sources: row.try_get("localization_sources")?,
+        vibration_status: row.try_get("vibration_status")?,
+        battery_min_voltage: row.try_get("battery_min_voltage")?,
+        gps_max_eph: row.try_get("gps_max_eph")?,
+        max_speed_m_s: row.try_get("max_speed_m_s")?,
+        total_distance_m: row.try_get("total_distance_m")?,
+        error_count: row.try_get("error_count")?,
+        warning_count: row.try_get("warning_count")?,
     })
 }
 
@@ -110,9 +170,13 @@ impl LogStore for PostgresStore {
             "INSERT INTO logs (id, filename, created_at, file_size, sys_name, ver_hw, \
              ver_sw_release_str, flight_duration_s, topic_count, lat, lon, is_public, delete_token, \
              description, wind_speed, rating, feedback, video_url, source, pilot_name, \
-             vehicle_name, tags, location_name, mission_type) \
+             vehicle_name, tags, location_name, mission_type, \
+             sys_uuid, ver_sw, vehicle_type, localization_sources, vibration_status, \
+             battery_min_voltage, gps_max_eph, max_speed_m_s, total_distance_m, \
+             error_count, warning_count) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
-             $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)",
+             $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, \
+             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)",
         )
         .bind(record.id)
         .bind(&record.filename)
@@ -138,6 +202,17 @@ impl LogStore for PostgresStore {
         .bind(&record.tags)
         .bind(&record.location_name)
         .bind(&record.mission_type)
+        .bind(&record.sys_uuid)
+        .bind(&record.ver_sw)
+        .bind(&record.vehicle_type)
+        .bind(&record.localization_sources)
+        .bind(&record.vibration_status)
+        .bind(record.battery_min_voltage)
+        .bind(record.gps_max_eph)
+        .bind(record.max_speed_m_s)
+        .bind(record.total_distance_m)
+        .bind(record.error_count)
+        .bind(record.warning_count)
         .execute(&self.pool)
         .await?;
 
@@ -247,7 +322,11 @@ impl LogStore for PostgresStore {
              ver_sw_release_str = $6, flight_duration_s = $7, topic_count = $8, lat = $9, lon = $10, \
              is_public = $11, delete_token = $12, description = $13, wind_speed = $14, rating = $15, \
              feedback = $16, video_url = $17, source = $18, pilot_name = $19, vehicle_name = $20, \
-             tags = $21, location_name = $22, mission_type = $23 WHERE id = $24",
+             tags = $21, location_name = $22, mission_type = $23, \
+             sys_uuid = $24, ver_sw = $25, vehicle_type = $26, localization_sources = $27, \
+             vibration_status = $28, battery_min_voltage = $29, gps_max_eph = $30, \
+             max_speed_m_s = $31, total_distance_m = $32, error_count = $33, warning_count = $34 \
+             WHERE id = $35",
         )
         .bind(&record.filename)
         .bind(record.created_at)
@@ -272,6 +351,17 @@ impl LogStore for PostgresStore {
         .bind(&record.tags)
         .bind(&record.location_name)
         .bind(&record.mission_type)
+        .bind(&record.sys_uuid)
+        .bind(&record.ver_sw)
+        .bind(&record.vehicle_type)
+        .bind(&record.localization_sources)
+        .bind(&record.vibration_status)
+        .bind(record.battery_min_voltage)
+        .bind(record.gps_max_eph)
+        .bind(record.max_speed_m_s)
+        .bind(record.total_distance_m)
+        .bind(record.error_count)
+        .bind(record.warning_count)
         .bind(id)
         .execute(&self.pool)
         .await?;
