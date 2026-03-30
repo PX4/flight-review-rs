@@ -125,6 +125,8 @@ pub struct FlightMetadata {
     pub ver_sw_release_str: Option<String>,
     /// GPS first-fix position (first valid lat/lon/alt from vehicle_gps_position)
     pub gps_first_fix: Option<GpsPosition>,
+    /// Flight analysis data (computed from a second streaming pass)
+    pub analysis: Option<crate::analysis::FlightAnalysis>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +179,7 @@ impl Default for FlightMetadata {
             flight_duration_s: None,
             ver_sw_release_str: None,
             gps_first_fix: None,
+            analysis: None,
         }
     }
 }

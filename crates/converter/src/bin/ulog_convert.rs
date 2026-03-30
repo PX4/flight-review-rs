@@ -41,13 +41,16 @@ fn main() {
     let cli = Cli::parse();
 
     if cli.metadata_only {
-        let metadata = match flight_review::metadata::extract_metadata(&cli.input) {
+        let mut metadata = match flight_review::metadata::extract_metadata(&cli.input) {
             Ok(m) => m,
             Err(e) => {
                 eprintln!("error: {}", e);
                 std::process::exit(1);
             }
         };
+        if let Ok(analysis) = flight_review::analysis::analyze(&cli.input, &metadata) {
+            metadata.analysis = Some(analysis);
+        }
 
         let json = serialize_metadata(&metadata, &cli.output_format);
 

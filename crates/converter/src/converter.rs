@@ -47,7 +47,11 @@ pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult
     let parsed = px4_ulog::full_parser::read_file(input_path)?;
 
     // Extract metadata via the streaming parser
-    let metadata = crate::metadata::extract_metadata(input_path)?;
+    let mut metadata = crate::metadata::extract_metadata(input_path)?;
+
+    // Run flight analysis (second streaming pass)
+    let analysis = crate::analysis::analyze(input_path, &metadata)?;
+    metadata.analysis = Some(analysis);
 
     // Convert each topic to a Parquet file
     let mut parquet_files = Vec::new();
