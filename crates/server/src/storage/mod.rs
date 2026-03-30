@@ -28,7 +28,7 @@ impl FileStorage {
             let path = url.strip_prefix("file://").unwrap();
             std::fs::create_dir_all(path)?;
             let store =
-                LocalFileSystem::new_with_prefix(path).map_err(object_store::Error::from)?;
+                LocalFileSystem::new_with_prefix(path)?;
             Ok(Self {
                 store: Arc::new(store),
             })

@@ -58,7 +58,7 @@ fn detect_vehicle_type(metadata: &FlightMetadata) -> Option<String> {
             10 => "Rover",
             11 => "Boat",
             12 => "Submarine",
-            19 | 20 | 21 | 22 => "VTOL",
+            19..=22 => "VTOL",
             _ => "Other",
         }
         .to_string(),

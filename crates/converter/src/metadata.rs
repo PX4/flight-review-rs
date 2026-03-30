@@ -60,7 +60,7 @@ pub struct ChangedParam {
     pub in_flight: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlightMetadata {
     /// System name (e.g., "PX4")
     pub sys_name: Option<String>,
@@ -145,44 +145,6 @@ pub struct TopicInfo {
     pub multi_id: u8,
 }
 
-impl Default for FlightMetadata {
-    fn default() -> Self {
-        Self {
-            sys_name: None,
-            ver_hw: None,
-            ver_hw_subtype: None,
-            ver_sw: None,
-            ver_sw_release: None,
-            sys_uuid: None,
-            sys_os_name: None,
-            sys_os_ver: None,
-            sys_toolchain: None,
-            sys_toolchain_ver: None,
-            time_ref_utc: None,
-            topics: HashMap::new(),
-            dropout_count: 0,
-            dropout_total_ms: 0,
-            logged_messages: Vec::new(),
-            tagged_logged_messages: Vec::new(),
-            parameters: HashMap::new(),
-            changed_parameters: Vec::new(),
-            default_parameters: HashMap::new(),
-            start_timestamp_us: 0,
-            info: HashMap::new(),
-            compat_flags: [0u8; 8],
-            incompat_flags: [0u8; 8],
-            appended_offsets: [0u64; 3],
-            file_version: 0,
-            removed_logged_ids: Vec::new(),
-            sync_count: 0,
-            multi_info: HashMap::new(),
-            flight_duration_s: None,
-            ver_sw_release_str: None,
-            gps_first_fix: None,
-            analysis: None,
-        }
-    }
-}
 
 /// Extract metadata from a ULog file using the streaming parser.
 pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {

@@ -41,7 +41,7 @@ pub struct ConvertResult {
 
 /// Convert a ULog file to per-topic Parquet files in the given output directory.
 pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult, ConvertError> {
-    std::fs::create_dir_all(output_dir).map_err(|e| ConvertError::Parse(e))?;
+    std::fs::create_dir_all(output_dir).map_err(ConvertError::Parse)?;
 
     // Parse the ULog file
     let parsed = px4_ulog::full_parser::read_file(input_path)?;

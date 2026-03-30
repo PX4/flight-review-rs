@@ -332,8 +332,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     let mut topics_initialized: HashMap<String, bool> = HashMap::new();
 
     read_file_with_simple_callback(path, &mut |msg| {
-        match msg {
-            Message::Data(data) => {
+        if let Message::Data(data) = msg {
                 let topic = data.flattened_format.message_name.as_str();
                 let ts = data
                     .flattened_format
@@ -417,8 +416,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                                     || current_in_transition != Some(it_val);
                                 if changed {
                                     // Close previous VTOL segment
-                                    if current_vehicle_type.is_some() {
-                                        let prev_vt = current_vehicle_type.unwrap();
+                                    if let Some(prev_vt) = current_vehicle_type {
                                         let prev_it = current_in_transition.unwrap_or(false);
                                         analysis.vtol_states.push(VtolStateSegment {
                                             state: vtol_state_name(prev_vt, prev_it).to_string(),
@@ -706,8 +704,6 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                     _ => {}
                 }
             }
-            _ => {}
-        }
         SimpleCallbackResult::KeepReading
     })?;
 

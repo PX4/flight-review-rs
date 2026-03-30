@@ -67,12 +67,8 @@ pub async fn get_log_file(
     Path((id, filename)): Path<(Uuid, String)>,
     headers: axum::http::HeaderMap,
 ) -> Result<impl IntoResponse, ApiError> {
-    let content_type = if filename.ends_with(".parquet") {
-        "application/octet-stream"
-    } else if filename.ends_with(".json") {
+    let content_type = if filename.ends_with(".json") {
         "application/json"
-    } else if filename.ends_with(".ulg") {
-        "application/octet-stream"
     } else {
         "application/octet-stream"
     };
