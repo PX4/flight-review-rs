@@ -55,6 +55,7 @@ pub trait LogStore: Send + Sync {
     async fn get(&self, id: Uuid) -> Result<Option<LogRecord>, DbError>;
     async fn list(&self, filters: &ListFilters) -> Result<ListResponse, DbError>;
     async fn delete(&self, id: Uuid) -> Result<bool, DbError>;
+    async fn update(&self, id: Uuid, record: &LogRecord) -> Result<(), DbError>;
 }
 
 #[derive(Debug, thiserror::Error)]

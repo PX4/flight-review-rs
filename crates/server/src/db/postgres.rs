@@ -204,6 +204,31 @@ impl LogStore for PostgresStore {
             .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn update(&self, id: Uuid, record: &LogRecord) -> Result<(), DbError> {
+        sqlx::query(
+            "UPDATE logs SET filename = $1, created_at = $2, file_size = $3, sys_name = $4, ver_hw = $5, \
+             ver_sw_release_str = $6, flight_duration_s = $7, topic_count = $8, lat = $9, lon = $10, \
+             is_public = $11, delete_token = $12 WHERE id = $13",
+        )
+        .bind(&record.filename)
+        .bind(record.created_at)
+        .bind(record.file_size)
+        .bind(&record.sys_name)
+        .bind(&record.ver_hw)
+        .bind(&record.ver_sw_release_str)
+        .bind(record.flight_duration_s)
+        .bind(record.topic_count)
+        .bind(record.lat)
+        .bind(record.lon)
+        .bind(record.is_public)
+        .bind(&record.delete_token)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "postgres"))]
@@ -228,6 +253,12 @@ impl LogStore for PostgresStore {
     }
 
     async fn delete(&self, _id: Uuid) -> Result<bool, DbError> {
+        Err(DbError::Sqlx(sqlx::Error::Configuration(
+            "postgres feature is not enabled".into(),
+        )))
+    }
+
+    async fn update(&self, _id: Uuid, _record: &LogRecord) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))

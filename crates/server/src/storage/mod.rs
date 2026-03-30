@@ -128,6 +128,14 @@ impl FileStorage {
         Ok(files)
     }
 
+    /// Get a file at an arbitrary path (relative to storage root).
+    /// Used for reading v1 ULG files that are not under the standard UUID prefix.
+    pub async fn get_raw(&self, path: &str) -> Result<Bytes, StorageError> {
+        let obj_path = ObjectPath::from(path.to_string());
+        let result = self.store.get(&obj_path).await?;
+        Ok(result.bytes().await?)
+    }
+
     /// Delete all files for a log.
     pub async fn delete_log_files(&self, log_id: Uuid) -> Result<(), StorageError> {
         use futures::TryStreamExt;

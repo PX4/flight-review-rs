@@ -220,6 +220,34 @@ impl LogStore for SqliteStore {
             .await?;
         Ok(result.rows_affected() > 0)
     }
+
+    async fn update(&self, id: Uuid, record: &LogRecord) -> Result<(), DbError> {
+        let id_str = id.to_string();
+        let created_at = record.created_at.to_rfc3339();
+
+        sqlx::query(
+            "UPDATE logs SET filename = ?, created_at = ?, file_size = ?, sys_name = ?, ver_hw = ?, \
+             ver_sw_release_str = ?, flight_duration_s = ?, topic_count = ?, lat = ?, lon = ?, \
+             is_public = ?, delete_token = ? WHERE id = ?",
+        )
+        .bind(&record.filename)
+        .bind(&created_at)
+        .bind(record.file_size)
+        .bind(&record.sys_name)
+        .bind(&record.ver_hw)
+        .bind(&record.ver_sw_release_str)
+        .bind(record.flight_duration_s)
+        .bind(record.topic_count)
+        .bind(record.lat)
+        .bind(record.lon)
+        .bind(record.is_public as i32)
+        .bind(&record.delete_token)
+        .bind(&id_str)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
 }
 
 #[cfg(not(feature = "sqlite"))]
@@ -247,6 +275,12 @@ impl super::LogStore for SqliteStore {
     }
 
     async fn delete(&self, _id: uuid::Uuid) -> Result<bool, super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn update(&self, _id: uuid::Uuid, _record: &super::LogRecord) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))

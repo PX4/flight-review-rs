@@ -4,6 +4,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use bytes::Bytes;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -57,6 +58,8 @@ pub async fn delete_log(
 
 /// GET /api/logs/:id/data/:filename -- serve Parquet/metadata files
 /// Supports HTTP Range requests for DuckDB-WASM compatibility.
+/// If the file does not exist in v2 storage but a v1 ULG prefix is configured,
+/// attempts lazy conversion of the original .ulg file on first access.
 pub async fn get_log_file(
     State(state): State<Arc<crate::AppState>>,
     Path((id, filename)): Path<(Uuid, String)>,
@@ -78,10 +81,22 @@ pub async fn get_log_file(
 
         let (start, end) = parse_byte_range(range_str)?;
 
-        let data = state
-            .storage
-            .get_range(id, &filename, start..end)
-            .await?;
+        // Try v2 storage first; lazy-convert on miss
+        let data = match state.storage.get_range(id, &filename, start..end).await {
+            Ok(d) => d,
+            Err(_) if state.v1_ulg_prefix.is_some() => {
+                let converted = lazy_convert(&state, id).await?;
+                if !converted {
+                    return Err(ApiError::NotFound);
+                }
+                state
+                    .storage
+                    .get_range(id, &filename, start..end)
+                    .await
+                    .map_err(|_| ApiError::NotFound)?
+            }
+            Err(_) => return Err(ApiError::NotFound),
+        };
 
         let content_range = format!("bytes {}-{}/{}", start, end.saturating_sub(1), "*");
 
@@ -97,7 +112,22 @@ pub async fn get_log_file(
         )
             .into_response())
     } else {
-        let data = state.storage.get_file(id, &filename).await?;
+        // Try v2 storage first; lazy-convert on miss
+        let data = match state.storage.get_file(id, &filename).await {
+            Ok(d) => d,
+            Err(_) if state.v1_ulg_prefix.is_some() => {
+                let converted = lazy_convert(&state, id).await?;
+                if !converted {
+                    return Err(ApiError::NotFound);
+                }
+                state
+                    .storage
+                    .get_file(id, &filename)
+                    .await
+                    .map_err(|_| ApiError::NotFound)?
+            }
+            Err(_) => return Err(ApiError::NotFound),
+        };
 
         Ok((
             StatusCode::OK,
@@ -110,6 +140,103 @@ pub async fn get_log_file(
         )
             .into_response())
     }
+}
+
+/// Lazily convert a v1 .ulg file to v2 Parquet on first access.
+///
+/// Returns `true` if conversion succeeded (or was already done), `false` if the
+/// source .ulg file could not be found.
+async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiError> {
+    let v1_prefix = state.v1_ulg_prefix.as_deref().unwrap();
+
+    // Idempotency check: if metadata.json already exists, another request won
+    // the race and conversion is done.
+    if state.storage.get_file(id, "metadata.json").await.is_ok() {
+        return Ok(true);
+    }
+
+    // Try to fetch the v1 .ulg file
+    let ulg_path = format!("{}/{}.ulg", v1_prefix, id);
+    let ulg_data = match state.storage.get_raw(&ulg_path).await {
+        Ok(data) => data,
+        Err(_) => return Ok(false),
+    };
+
+    let file_size = ulg_data.len() as i64;
+
+    // Write to temp file and convert
+    let tmp_dir =
+        tempfile::tempdir().map_err(|e| ApiError::Internal(format!("tempdir: {e}")))?;
+    let input_path = tmp_dir.path().join("input.ulg");
+    tokio::fs::write(&input_path, &ulg_data).await?;
+
+    let output_dir = tmp_dir.path().join("output");
+    let input_str = input_path.to_string_lossy().to_string();
+    let output_dir_clone = output_dir.clone();
+
+    let result = tokio::task::spawn_blocking(move || {
+        flight_review::converter::convert_ulog(&input_str, &output_dir_clone)
+    })
+    .await
+    .map_err(|e| ApiError::Internal(format!("spawn_blocking join error: {e}")))?
+    .map_err(|e| ApiError::Internal(format!("conversion error: {e}")))?;
+
+    // Upload Parquet files
+    for parquet_path in &result.parquet_files {
+        let fname = parquet_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| ApiError::Internal("invalid parquet filename".to_string()))?;
+        let file_data = tokio::fs::read(parquet_path).await?;
+        state
+            .storage
+            .put_file(id, fname, Bytes::from(file_data))
+            .await?;
+    }
+
+    // Upload metadata.json
+    let metadata_json = serde_json::to_vec_pretty(&result.metadata)
+        .map_err(|e| ApiError::Internal(format!("metadata serialization: {e}")))?;
+    state
+        .storage
+        .put_file(id, "metadata.json", Bytes::from(metadata_json))
+        .await?;
+
+    // Update the DB record with fields extracted from the conversion
+    if let Some(mut record) = state.db.get(id).await? {
+        record.sys_name = result.metadata.sys_name.clone().or(record.sys_name);
+        record.ver_hw = result.metadata.ver_hw.clone().or(record.ver_hw);
+        record.ver_sw_release_str = result
+            .metadata
+            .ver_sw_release_str
+            .clone()
+            .or(record.ver_sw_release_str);
+        record.flight_duration_s = result.metadata.flight_duration_s.or(record.flight_duration_s);
+        record.topic_count = result.metadata.topics.len() as i32;
+        record.lat = result
+            .metadata
+            .gps_first_fix
+            .as_ref()
+            .map(|g| g.lat_deg)
+            .or(record.lat);
+        record.lon = result
+            .metadata
+            .gps_first_fix
+            .as_ref()
+            .map(|g| g.lon_deg)
+            .or(record.lon);
+        record.file_size = file_size;
+        state.db.update(id, &record).await?;
+    }
+
+    tracing::info!(
+        log_id = %id,
+        topics = result.metadata.topics.len(),
+        parquet_files = result.parquet_files.len(),
+        "lazy conversion complete"
+    );
+
+    Ok(true)
 }
 
 /// Parse a simple `bytes=START-END` range header.
