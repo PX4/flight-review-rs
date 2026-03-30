@@ -59,7 +59,13 @@ pub async fn upload(
     .map_err(|e| ApiError::Internal(format!("spawn_blocking join error: {e}")))?
     .map_err(|e| ApiError::Internal(format!("conversion error: {e}")))?;
 
-    // 5. Store each Parquet file in object storage under log_id/
+    // 5. Store the raw .ulg file alongside converted data
+    state
+        .storage
+        .put_file(log_id, &original_filename, data.clone())
+        .await?;
+
+    // Store each Parquet file in object storage under log_id/
     for parquet_path in &result.parquet_files {
         let filename = parquet_path
             .file_name()

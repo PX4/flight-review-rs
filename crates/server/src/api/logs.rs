@@ -69,6 +69,8 @@ pub async fn get_log_file(
         "application/octet-stream"
     } else if filename.ends_with(".json") {
         "application/json"
+    } else if filename.ends_with(".ulg") {
+        "application/octet-stream"
     } else {
         "application/octet-stream"
     };
@@ -200,6 +202,13 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
     state
         .storage
         .put_file(id, "metadata.json", Bytes::from(metadata_json))
+        .await?;
+
+    // Copy the raw .ulg into the UUID directory so everything lives together
+    let ulg_filename = format!("{}.ulg", id);
+    state
+        .storage
+        .put_file(id, &ulg_filename, ulg_data)
         .await?;
 
     // Update the DB record with fields extracted from the conversion
