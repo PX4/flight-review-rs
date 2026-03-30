@@ -9,6 +9,8 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::extract::extract_search_fields;
+
 use super::ApiError;
 
 /// GET /api/logs -- list with filters
@@ -235,6 +237,20 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
             .map(|g| g.lon_deg)
             .or(record.lon);
         record.file_size = file_size;
+
+        let search = extract_search_fields(&result.metadata);
+        record.sys_uuid = search.sys_uuid.or(record.sys_uuid);
+        record.ver_sw = search.ver_sw.or(record.ver_sw);
+        record.vehicle_type = search.vehicle_type.or(record.vehicle_type);
+        record.localization_sources = search.localization_sources.or(record.localization_sources);
+        record.vibration_status = search.vibration_status.or(record.vibration_status);
+        record.battery_min_voltage = search.battery_min_voltage.or(record.battery_min_voltage);
+        record.gps_max_eph = search.gps_max_eph.or(record.gps_max_eph);
+        record.max_speed_m_s = search.max_speed_m_s.or(record.max_speed_m_s);
+        record.total_distance_m = search.total_distance_m.or(record.total_distance_m);
+        record.error_count = search.error_count.or(record.error_count);
+        record.warning_count = search.warning_count.or(record.warning_count);
+
         state.db.update(id, &record).await?;
     }
 

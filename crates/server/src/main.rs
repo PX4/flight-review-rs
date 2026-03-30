@@ -113,6 +113,7 @@ async fn run_server(config: ServeConfig) {
         .route("/api/upload", post(api::upload::upload)
             .layer(DefaultBodyLimit::max(512 * 1024 * 1024))) // 512 MB
         .route("/api/logs", get(api::logs::list_logs))
+        .route("/api/stats", get(api::stats::get_stats))
         .route(
             "/api/logs/{id}",
             get(api::logs::get_log).delete(api::logs::delete_log),
@@ -133,6 +134,22 @@ async fn run_server(config: ServeConfig) {
     axum::serve(listener, app)
         .await
         .expect("server error");
+}
+
+/// Map v1 MavType string to a normalized vehicle type category.
+#[cfg(feature = "sqlite")]
+fn map_v1_mav_type(mav_type: &str) -> String {
+    match mav_type {
+        "Quadrotor" | "Hexarotor" | "Octorotor" | "Coaxial" | "Tricopter" | "Helicopter" => {
+            "Multirotor".to_string()
+        }
+        "Fixed Wing" => "Fixed Wing".to_string(),
+        s if s.starts_with("VTOL") => "VTOL".to_string(),
+        "Rover" => "Rover".to_string(),
+        "Boat" => "Boat".to_string(),
+        "Submarine" => "Submarine".to_string(),
+        _ => "Other".to_string(),
+    }
 }
 
 #[cfg(feature = "sqlite")]
@@ -254,6 +271,20 @@ async fn run_migrate(config: MigrateConfig) {
         let feedback: Option<String> = row.try_get("Feedback").ok().flatten();
         let video_url: Option<String> = row.try_get("VideoUrl").ok().flatten();
 
+        // Search fields from v1 LogsGenerated
+        let sys_uuid: Option<String> = row.try_get("UUID").ok().flatten();
+        let ver_sw: Option<String> = row.try_get("Software").ok().flatten();
+        let v1_mav_type: Option<String> = row.try_get("MavType").ok().flatten();
+        let vehicle_type = v1_mav_type.as_deref().map(map_v1_mav_type);
+        let num_errors_str: Option<String> = row.try_get("NumLoggedErrors").ok().flatten();
+        let error_count: Option<i32> = num_errors_str
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+        let num_warnings_str: Option<String> = row.try_get("NumLoggedWarnings").ok().flatten();
+        let warning_count: Option<i32> = num_warnings_str
+            .as_deref()
+            .and_then(|s| s.parse::<i32>().ok());
+
         let record = db::LogRecord {
             id,
             filename,
@@ -279,18 +310,17 @@ async fn run_migrate(config: MigrateConfig) {
             tags: None,
             location_name: None,
             mission_type: None,
-            // Search fields — not available during v1 import
-            sys_uuid: None,
-            ver_sw: None,
-            vehicle_type: None,
+            sys_uuid,
+            ver_sw,
+            vehicle_type,
             localization_sources: None,
             vibration_status: None,
             battery_min_voltage: None,
             gps_max_eph: None,
             max_speed_m_s: None,
             total_distance_m: None,
-            error_count: None,
-            warning_count: None,
+            error_count,
+            warning_count,
         };
 
         match v2_db.insert(&record).await {

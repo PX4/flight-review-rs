@@ -3,6 +3,8 @@ use bytes::Bytes;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::extract::extract_search_fields;
+
 use super::ApiError;
 
 pub async fn upload(
@@ -122,6 +124,7 @@ pub async fn upload(
 
     // 6. Create a LogRecord from the metadata and insert into DB
     let delete_token = Uuid::new_v4().simple().to_string();
+    let search = extract_search_fields(&result.metadata);
     let record = crate::db::LogRecord {
         id: log_id,
         filename: original_filename,
@@ -147,18 +150,17 @@ pub async fn upload(
         tags,
         location_name,
         mission_type,
-        // Search fields — populated by extract_search_fields in commit 5
-        sys_uuid: None,
-        ver_sw: None,
-        vehicle_type: None,
-        localization_sources: None,
-        vibration_status: None,
-        battery_min_voltage: None,
-        gps_max_eph: None,
-        max_speed_m_s: None,
-        total_distance_m: None,
-        error_count: None,
-        warning_count: None,
+        sys_uuid: search.sys_uuid,
+        ver_sw: search.ver_sw,
+        vehicle_type: search.vehicle_type,
+        localization_sources: search.localization_sources,
+        vibration_status: search.vibration_status,
+        battery_min_voltage: search.battery_min_voltage,
+        gps_max_eph: search.gps_max_eph,
+        max_speed_m_s: search.max_speed_m_s,
+        total_distance_m: search.total_distance_m,
+        error_count: search.error_count,
+        warning_count: search.warning_count,
     };
 
     state.db.insert(&record).await?;
