@@ -10,7 +10,7 @@ categories = ["science", "command-line-utilities", "parser-implementations"]
 
 [dependencies]
 px4-ulog = { git = "https://github.com/mrpollo/px4-ulog-rs.git", branch = "test/comprehensive-test-coverage" }
-arrow = { version = "54", features = ["prettyprint"] }
+arrow = "54"
 parquet = { version = "54", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
