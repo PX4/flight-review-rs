@@ -44,7 +44,7 @@
 				<li>
 					<a
 						href="/log/{log.id}"
-						class="flex items-center justify-between gap-x-6 py-4 hover:bg-gray-50 rounded-md px-3 -mx-3 cursor-pointer"
+						class="flex items-center justify-between gap-x-4 py-4 hover:bg-gray-50 rounded-md px-3 -mx-3 cursor-pointer"
 					>
 						<div class="min-w-0">
 							<div class="flex items-center gap-x-3">

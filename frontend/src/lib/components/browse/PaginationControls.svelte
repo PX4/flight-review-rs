@@ -57,7 +57,7 @@
 			<span class="font-medium text-gray-900">{total.toLocaleString()}</span> results
 		</p>
 	</div>
-	<div class="flex flex-1 justify-between sm:justify-end gap-x-1">
+	<div class="flex flex-1 flex-wrap justify-between sm:justify-end gap-x-1 gap-y-2">
 		<button
 			type="button"
 			class="relative inline-flex items-center rounded-md bg-white px-3 py-2 text-sm font-semibold text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"

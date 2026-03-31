@@ -79,7 +79,7 @@
 
 <div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col lg:h-full">
 	<!-- Controls -->
-	<div class="border-b border-gray-200 px-4 py-2 flex flex-wrap items-center gap-2">
+	<div class="border-b border-gray-200 px-3 sm:px-4 py-2 flex flex-wrap items-center gap-2">
 		<!-- Level filters -->
 		{#each LEVELS as level}
 			{@const colors = LEVEL_COLORS[level]}
@@ -93,18 +93,18 @@
 		{/each}
 
 		<!-- Search -->
-		<div class="ml-auto flex-shrink-0">
+		<div class="w-full sm:w-auto sm:ml-auto flex-shrink-0">
 			<input
 				type="text"
 				placeholder="Search messages..."
-				class="rounded-md border-0 bg-gray-50 px-3 py-1 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 w-48"
+				class="rounded-md border-0 bg-gray-50 px-3 py-1 text-sm text-gray-900 ring-1 ring-inset ring-gray-200 placeholder:text-gray-400 focus:ring-2 focus:ring-indigo-500 w-full sm:w-48"
 				bind:value={searchText}
 			/>
 		</div>
 	</div>
 
 	<!-- Message count -->
-	<div class="px-4 py-1 text-xs text-gray-400 border-b border-gray-100">
+	<div class="px-3 sm:px-4 py-1 text-xs text-gray-400 border-b border-gray-100">
 		{filteredMessages.length} of {messages.length} messages
 	</div>
 
@@ -120,7 +120,7 @@
 					{@const level = normalizeLevel(msg.level)}
 					{@const colors = LEVEL_COLORS[level]}
 					<button
-						class="w-full text-left flex items-center gap-2 px-4 h-7 hover:bg-gray-50 cursor-pointer {colors.bg}"
+						class="w-full text-left flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-7 hover:bg-gray-50 cursor-pointer {colors.bg}"
 						onclick={() => handleMessageClick(msg.timestamp_us)}
 					>
 						<span class="text-gray-400 flex-shrink-0">[{formatTimestamp(msg.timestamp_us)}]</span>

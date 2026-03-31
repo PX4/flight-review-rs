@@ -15,6 +15,7 @@
 		key: string;
 		label: string;
 		sortable: boolean;
+		hiddenMobile?: boolean;
 	}
 
 	const columns: Column[] = [
@@ -22,9 +23,9 @@
 		{ key: 'sys_name', label: 'Vehicle', sortable: true },
 		{ key: 'ver_hw', label: 'Hardware', sortable: true },
 		{ key: 'flight_duration_s', label: 'Duration', sortable: true },
-		{ key: 'topic_count', label: 'Topics', sortable: true },
-		{ key: 'file_size', label: 'Size', sortable: true },
-		{ key: 'location_name', label: 'Location', sortable: false },
+		{ key: 'topic_count', label: 'Topics', sortable: true, hiddenMobile: true },
+		{ key: 'file_size', label: 'Size', sortable: true, hiddenMobile: true },
+		{ key: 'location_name', label: 'Location', sortable: false, hiddenMobile: true },
 	];
 
 	function sortIndicator(key: string): string {
@@ -67,7 +68,7 @@
 						{#each columns as col}
 							<th
 								scope="col"
-								class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 {col.sortable ? 'cursor-pointer select-none hover:text-indigo-600' : ''}"
+								class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 {col.sortable ? 'cursor-pointer select-none hover:text-indigo-600' : ''} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
 								onclick={() => col.sortable && onSort(col.key)}
 							>
 								{col.label}{sortIndicator(col.key)}
@@ -83,7 +84,7 @@
 						>
 							{#each columns as col}
 								<td
-									class="whitespace-nowrap px-3 py-4 text-sm {col.key === 'sys_name' ? 'font-medium text-gray-900' : 'text-gray-500'}"
+									class="whitespace-nowrap px-3 py-4 text-sm {col.key === 'sys_name' ? 'font-medium text-gray-900' : 'text-gray-500'} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
 								>
 									{cellValue(log, col.key)}
 								</td>

@@ -135,9 +135,9 @@
 
 <div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col lg:h-full">
 	<!-- Controls -->
-	<div class="border-b border-gray-200 px-4 py-2 space-y-2">
+	<div class="border-b border-gray-200 px-3 sm:px-4 py-2 space-y-2">
 		<!-- View mode toggles -->
-		<div class="flex items-center gap-1">
+		<div class="flex flex-wrap items-center gap-1">
 			{#each viewModes as mode}
 				<button
 					class="rounded-md px-2.5 py-1 text-xs font-medium transition-colors {viewMode ===
@@ -169,35 +169,35 @@
 	</div>
 
 	<!-- Count -->
-	<div class="px-4 py-1 text-xs text-gray-400 border-b border-gray-100">
+	<div class="px-3 sm:px-4 py-1 text-xs text-gray-400 border-b border-gray-100">
 		{filteredDiffs.length} of {totalCount} parameters
 	</div>
 
 	<!-- Table -->
-	<div class="flex-1 overflow-auto">
+	<div class="flex-1 overflow-x-auto overflow-y-auto">
 		<table class="min-w-full text-sm">
 			<thead class="sticky top-0 bg-gray-50 border-b border-gray-200">
 				<tr>
 					<th
-						class="text-left px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
+						class="text-left px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
 						onclick={() => toggleSort('name')}
 					>
 						Parameter{sortArrow('name')}
 					</th>
 					<th
-						class="text-right px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
+						class="text-right px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
 						onclick={() => toggleSort('value')}
 					>
 						Current{sortArrow('value')}
 					</th>
 					<th
-						class="text-right px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
+						class="text-right px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
 						onclick={() => toggleSort('default')}
 					>
 						Default{sortArrow('default')}
 					</th>
 					<th
-						class="text-right px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
+						class="text-right px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
 						onclick={() => toggleSort('delta')}
 					>
 						Delta{sortArrow('delta')}
@@ -210,7 +210,7 @@
 					{@const isInFlight = inFlightNames.has(diff.name)}
 					{@const isNonDefault = diff.value !== diff.default}
 					<tr class="hover:bg-gray-50 {isInFlight ? 'bg-orange-50/40' : ''}">
-						<td class="px-4 py-1.5 font-mono text-xs">
+						<td class="px-3 sm:px-4 py-1.5 font-mono text-xs">
 							<button
 								class="text-left hover:text-indigo-600 cursor-pointer inline-flex items-center gap-1"
 								onclick={() => copyParamName(diff.name)}
@@ -240,17 +240,17 @@
 							</button>
 						</td>
 						<td
-							class="px-4 py-1.5 text-right font-mono text-xs {isNonDefault
+							class="px-3 sm:px-4 py-1.5 text-right font-mono text-xs {isNonDefault
 								? 'text-gray-900 font-medium'
 								: 'text-gray-400'}"
 						>
 							{formatNumber(diff.value)}
 						</td>
-						<td class="px-4 py-1.5 text-right font-mono text-xs text-gray-500">
+						<td class="px-3 sm:px-4 py-1.5 text-right font-mono text-xs text-gray-500">
 							{formatNumber(diff.default)}
 						</td>
 						<td
-							class="px-4 py-1.5 text-right font-mono text-xs {isNonDefault
+							class="px-3 sm:px-4 py-1.5 text-right font-mono text-xs {isNonDefault
 								? getDeltaColor(pct)
 								: 'text-gray-300'}"
 						>

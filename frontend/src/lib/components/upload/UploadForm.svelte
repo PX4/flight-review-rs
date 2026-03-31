@@ -56,7 +56,7 @@
 			></textarea>
 		</div>
 
-		<div class="grid grid-cols-2 gap-4">
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			<div>
 				<label for="wind-speed" class="block text-sm font-medium text-gray-700 mb-1.5">Wind Speed</label>
 				<select
@@ -90,7 +90,7 @@
 			</div>
 		</div>
 
-		<div class="grid grid-cols-2 gap-4">
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			<div>
 				<label for="pilot-name" class="block text-sm font-medium text-gray-700 mb-1.5">Pilot Name</label>
 				<input
@@ -115,7 +115,7 @@
 			</div>
 		</div>
 
-		<div class="grid grid-cols-2 gap-4">
+		<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
 			<div>
 				<label for="location" class="block text-sm font-medium text-gray-700 mb-1.5">Location</label>
 				<input

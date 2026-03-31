@@ -162,10 +162,8 @@
 				</div>
 			{:else}
 				<!-- Horizontally scrollable table wrapper for mobile -->
-				<div class="overflow-x-auto -mx-4 sm:mx-0">
-					<div class="inline-block min-w-full align-middle">
-						<LogTable {logs} {sortField} {sortDir} onSort={handleSort} />
-					</div>
+				<div class="overflow-x-auto">
+					<LogTable {logs} {sortField} {sortDir} onSort={handleSort} />
 				</div>
 
 				<PaginationControls
