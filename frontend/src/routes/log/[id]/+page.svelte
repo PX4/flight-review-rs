@@ -76,7 +76,7 @@
 		{/if}
 
 		<!-- Main area: sidebar + plots -->
-		<div class="flex flex-1 min-h-0 lg:overflow-hidden">
+		<div class="flex min-h-[50vh] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
 			<!-- Topic Tree Sidebar (desktop) -->
 			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0 dark:lg:border-gray-700 dark:bg-gray-900">
 				<TopicTreeSidebar {metadata} />
