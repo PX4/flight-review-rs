@@ -14,6 +14,7 @@
 	let metadata = $state<FlightMetadata | null>(null);
 	let loading = $state(true);
 	let error = $state('');
+	let mobileTopicsOpen = $state(false);
 
 	async function loadData() {
 		loading = true;
@@ -54,8 +55,8 @@
 {:else if metadata && logRecord}
 	<div class="flex h-screen flex-col overflow-hidden">
 		<!-- Compact top bar -->
-		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0">
-			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
+		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0 dark:border-gray-700 dark:bg-gray-900">
+			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
 				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
 				</svg>
@@ -75,8 +76,8 @@
 
 		<!-- Main area: sidebar + plots -->
 		<div class="flex flex-1 overflow-hidden">
-			<!-- Topic Tree Sidebar -->
-			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0">
+			<!-- Topic Tree Sidebar (desktop) -->
+			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0 dark:lg:border-gray-700 dark:bg-gray-900">
 				<TopicTreeSidebar {metadata} />
 			</div>
 
@@ -86,4 +87,47 @@
 			</div>
 		</div>
 	</div>
+
+	<!-- Floating "Topics" button for mobile -->
+	<button
+		onclick={() => (mobileTopicsOpen = true)}
+		class="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-indigo-500 lg:hidden"
+		aria-label="Open topic tree"
+	>
+		<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+			<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
+		</svg>
+		Topics
+	</button>
+
+	<!-- Mobile topic sidebar slide-over -->
+	{#if mobileTopicsOpen}
+		<div class="fixed inset-0 z-50 lg:hidden">
+			<!-- Backdrop -->
+			<!-- biome-ignore lint: backdrop click to close -->
+			<div
+				class="fixed inset-0 bg-gray-900/80"
+				onclick={() => (mobileTopicsOpen = false)}
+				role="presentation"
+			></div>
+
+			<!-- Panel -->
+			<div class="fixed inset-y-0 right-0 z-50 w-full max-w-xs overflow-y-auto bg-white dark:bg-gray-900">
+				<div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
+					<h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Topics</h2>
+					<button
+						type="button"
+						class="-m-2 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+						aria-label="Close topics"
+						onclick={() => (mobileTopicsOpen = false)}
+					>
+						<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+						</svg>
+					</button>
+				</div>
+				<TopicTreeSidebar {metadata} />
+			</div>
+		</div>
+	{/if}
 {/if}

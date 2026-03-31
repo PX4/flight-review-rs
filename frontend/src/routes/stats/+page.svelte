@@ -149,8 +149,8 @@
 <div class="px-4 sm:px-6 lg:px-8 py-8">
 	<!-- Header -->
 	<div class="mb-6">
-		<h1 class="text-base font-semibold text-gray-900">Statistics</h1>
-		<p class="mt-1 text-sm text-gray-500">Flight log analytics and trends</p>
+		<h1 class="text-base font-semibold text-gray-900 dark:text-gray-100">Statistics</h1>
+		<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Flight log analytics and trends</p>
 	</div>
 
 	<!-- Filter panel -->
@@ -165,7 +165,7 @@
 
 	<!-- Error banner -->
 	{#if error}
-		<div class="rounded-md bg-red-50 p-4 mb-6">
+		<div class="rounded-md bg-red-50 p-4 mb-6 dark:bg-red-900/20">
 			<div class="flex">
 				<div class="shrink-0">
 					<svg class="size-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -173,7 +173,7 @@
 					</svg>
 				</div>
 				<div class="ml-3">
-					<p class="text-sm text-red-700">{error}</p>
+					<p class="text-sm text-red-700 dark:text-red-400">{error}</p>
 				</div>
 			</div>
 		</div>
@@ -190,7 +190,7 @@
 		/>
 	</div>
 
-	<!-- Charts grid -->
+	<!-- Charts grid: single column on mobile, 2 columns on lg+ -->
 	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 		<HardwareBars data={hwData} loading={loadingHw} onBarClick={handleHardwareClick} />
 		<VehicleTypeDonut data={vehicleData} loading={loadingVehicle} />
