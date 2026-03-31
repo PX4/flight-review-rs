@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { FlightMetadata } from '$lib/types';
 	import { formatDuration } from '$lib/utils/formatters';
+	import { getHardwareName } from '$lib/utils/hardwareNames';
 
 	let { metadata, logId } = $props<{ metadata: FlightMetadata; logId: string }>();
 
@@ -49,7 +50,7 @@
 		</div>
 		<div class="px-4 py-3">
 			<dt class="text-xs text-gray-500">Hardware</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">{metadata.ver_hw ?? '\u2014'}</dd>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 truncate" title={metadata.ver_hw ?? ''}>{getHardwareName(metadata.ver_hw)}</dd>
 		</div>
 		<div class="px-4 py-3">
 			<dt class="text-xs text-gray-500">Firmware</dt>

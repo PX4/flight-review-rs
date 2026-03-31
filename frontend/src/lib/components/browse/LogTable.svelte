@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import type { LogRecord } from '$lib/types';
 	import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/formatters';
+	import { getHardwareName } from '$lib/utils/hardwareNames';
 
 	let { logs, sortField, sortDir, onSort }: {
 		logs: LogRecord[];
@@ -42,7 +43,7 @@
 			case 'sys_name':
 				return log.sys_name ?? '\u2014';
 			case 'ver_hw':
-				return log.ver_hw ?? '\u2014';
+				return getHardwareName(log.ver_hw);
 			case 'flight_duration_s':
 				return formatDuration(log.flight_duration_s);
 			case 'topic_count':
