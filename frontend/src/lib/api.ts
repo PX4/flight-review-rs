@@ -1,4 +1,4 @@
-import type { LogRecord, ListFilters, ListResponse, UploadOptions, UploadResponse } from './types';
+import type { LogRecord, ListFilters, ListResponse, UploadOptions, UploadResponse, FlightMetadata, StatsResponse } from './types';
 
 const BASE = '/api';
 
@@ -71,7 +71,29 @@ export function uploadLog(
   return { promise, abort: () => xhr.abort() };
 }
 
+export async function getMetadata(id: string): Promise<FlightMetadata> {
+  return apiFetch(`/logs/${id}/data/metadata.json`);
+}
+
 export async function deleteLog(id: string, token: string): Promise<void> {
   const res = await fetch(`${BASE}/logs/${id}?token=${token}`, { method: 'DELETE' });
   if (!res.ok) throw new ApiError(res.status, await res.text());
+}
+
+export async function getStats(params: {
+  group_by: string;
+  period?: string;
+  limit?: number;
+  vehicle_type?: string;
+  ver_hw?: string;
+  source?: string;
+}): Promise<StatsResponse> {
+  const p = new URLSearchParams();
+  p.set('group_by', params.group_by);
+  if (params.period) p.set('period', params.period);
+  if (params.limit) p.set('limit', String(params.limit));
+  if (params.vehicle_type) p.set('vehicle_type', params.vehicle_type);
+  if (params.ver_hw) p.set('ver_hw', params.ver_hw);
+  if (params.source) p.set('source', params.source);
+  return apiFetch(`/stats?${p}`);
 }

@@ -65,3 +65,136 @@ export interface UploadResponse {
   delete_token: string;
   parquet_files: string[];
 }
+
+// --- Metadata types ---
+
+export interface FlightMetadata {
+  sys_name: string | null;
+  ver_hw: string | null;
+  ver_sw_release_str: string | null;
+  sys_uuid: string | null;
+  flight_duration_s: number | null;
+  topics: Record<string, TopicInfo>;
+  dropout_count: number;
+  logged_messages: LogEntry[];
+  tagged_logged_messages: TaggedLogEntry[];
+  parameters: Record<string, number>;
+  changed_parameters: ChangedParam[];
+  default_parameters: Record<string, number>;
+  analysis: FlightAnalysis | null;
+}
+
+export interface TopicInfo {
+  message_count: number;
+  multi_id: number;
+}
+
+export interface LogEntry {
+  level: string;
+  timestamp_us: number;
+  message: string;
+}
+
+export interface TaggedLogEntry {
+  level: string;
+  tag: number;
+  timestamp_us: number;
+  message: string;
+}
+
+export interface ChangedParam {
+  name: string;
+  value: number;
+  in_flight: boolean;
+}
+
+export interface FlightAnalysis {
+  flight_modes: FlightModeSegment[];
+  vtol_states: VtolStateSegment[];
+  stats: FlightStats;
+  battery: BatterySummary;
+  gps_quality: GpsQuality;
+  vibration: VibrationSummary;
+  non_default_params: ParamDiff[];
+  gps_track: TrackPoint[];
+}
+
+export interface FlightModeSegment {
+  mode: string;
+  mode_id: number;
+  start_us: number;
+  end_us: number;
+  duration_s: number;
+}
+
+export interface VtolStateSegment {
+  state: string;
+  start_us: number;
+  end_us: number;
+}
+
+export interface FlightStats {
+  total_distance_m: number;
+  max_altitude_diff_m: number;
+  max_speed_m_s: number;
+}
+
+export interface BatterySummary {
+  discharged_mah: number | null;
+  min_voltage_v: number | null;
+}
+
+export interface GpsQuality {
+  max_satellites: number | null;
+  max_eph_m: number | null;
+}
+
+export interface VibrationSummary {
+  accel_vibe_mean: number | null;
+  status: string;
+}
+
+export interface ParamDiff {
+  name: string;
+  value: number;
+  default: number;
+}
+
+export interface TrackPoint {
+  lat_deg: number;
+  lon_deg: number;
+  alt_m: number;
+  timestamp_us: number;
+  mode_id: number;
+}
+
+// --- Stats types ---
+
+export interface StatsFilters {
+  vehicleType?: string;
+  verHw?: string;
+  source?: string;
+}
+
+export interface StatsResponse {
+  group_by: string;
+  period: string;
+  data: StatsDataPoint[];
+}
+
+export interface StatsDataPoint {
+  group: string;
+  count: number;
+  avg_flight_duration_s?: number;
+  total_flight_hours?: number;
+  avg_max_speed?: number;
+}
+
+export interface PlotConfig {
+  id: string;
+  topic: string;
+  multiId: number;
+  fields: string[];
+  yLabel: string;
+  colors: string[];
+}
