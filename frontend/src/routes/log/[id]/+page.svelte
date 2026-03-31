@@ -53,7 +53,8 @@
 		<ErrorBanner message={error} onRetry={loadData} />
 	</div>
 {:else if metadata && logRecord}
-	<div class="flex h-screen flex-col overflow-hidden">
+	<!-- Mobile: everything scrolls. Desktop: header/timeline fixed, plot area scrolls independently -->
+	<div class="flex h-screen flex-col overflow-y-auto lg:overflow-hidden">
 		<!-- Compact top bar -->
 		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0 dark:border-gray-700 dark:bg-gray-900">
 			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
@@ -75,14 +76,14 @@
 		{/if}
 
 		<!-- Main area: sidebar + plots -->
-		<div class="flex flex-1 overflow-hidden">
+		<div class="flex flex-1 min-h-0 lg:overflow-hidden">
 			<!-- Topic Tree Sidebar (desktop) -->
 			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0 dark:lg:border-gray-700 dark:bg-gray-900">
 				<TopicTreeSidebar {metadata} />
 			</div>
 
 			<!-- Plot area -->
-			<div class="flex-1 flex flex-col overflow-hidden">
+			<div class="flex-1 flex flex-col lg:overflow-hidden">
 				<PlotContainer {metadata} logId={logRecord.id} />
 			</div>
 		</div>

@@ -2,6 +2,7 @@
 	import { listLogs } from '$lib/api';
 	import type { LogRecord } from '$lib/types';
 	import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/formatters';
+	import { getHardwareName } from '$lib/utils/hardwareNames';
 	import LoadingSpinner from '$lib/components/shared/LoadingSpinner.svelte';
 
 	let logs = $state<LogRecord[]>([]);
@@ -49,7 +50,7 @@
 							<div class="flex items-center gap-x-3">
 								<p class="text-sm font-semibold text-gray-900">{log.vehicle_name || log.sys_name || 'Unknown'}</p>
 								{#if log.ver_hw}
-									<span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-200">{log.ver_hw}</span>
+									<span class="inline-flex items-center rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-200 truncate max-w-[10rem]" title={log.ver_hw}>{getHardwareName(log.ver_hw)}</span>
 								{/if}
 							</div>
 							<p class="mt-1 text-xs text-gray-500">{log.topic_count} topics · {formatFileSize(log.file_size)}</p>
