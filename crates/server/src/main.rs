@@ -118,6 +118,7 @@ async fn run_server(config: ServeConfig) {
             "/api/logs/{id}",
             get(api::logs::get_log).delete(api::logs::delete_log),
         )
+        .route("/api/logs/{id}/track", get(api::logs::get_track))
         .route(
             "/api/logs/{id}/data/{filename}",
             get(api::logs::get_log_file),

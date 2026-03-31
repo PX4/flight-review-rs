@@ -1,7 +1,7 @@
 <script lang="ts">
-	import type { FlightMetadata, TrackPoint } from '$lib/types';
+	import type { TrackPointCompact } from '$lib/api';
+	import { getTrack } from '$lib/api';
 	import { getModeColor } from '$lib/utils/modeColors';
-	import { getMetadata } from '$lib/api';
 
 	let { logId, width = 160, height = 100 }: { logId: string; width?: number; height?: number } = $props();
 
@@ -10,19 +10,19 @@
 	let status = $state<'idle' | 'loading' | 'loaded' | 'no-gps' | 'error'>('idle');
 
 	// Module-level cache shared across all instances
-	const metadataCache = new Map<string, FlightMetadata>();
+	const trackCache = new Map<string, TrackPointCompact[]>();
 
-	function drawTrack(ctx: CanvasRenderingContext2D, track: TrackPoint[], w: number, h: number) {
+	function drawTrack(ctx: CanvasRenderingContext2D, track: TrackPointCompact[], w: number, h: number) {
 		if (track.length < 2) return;
 
 		const pad = 8;
 		let minLat = Infinity, maxLat = -Infinity;
 		let minLon = Infinity, maxLon = -Infinity;
 		for (const pt of track) {
-			if (pt.lat_deg < minLat) minLat = pt.lat_deg;
-			if (pt.lat_deg > maxLat) maxLat = pt.lat_deg;
-			if (pt.lon_deg < minLon) minLon = pt.lon_deg;
-			if (pt.lon_deg > maxLon) maxLon = pt.lon_deg;
+			if (pt.lat < minLat) minLat = pt.lat;
+			if (pt.lat > maxLat) maxLat = pt.lat;
+			if (pt.lon < minLon) minLon = pt.lon;
+			if (pt.lon > maxLon) maxLon = pt.lon;
 		}
 
 		const latRange = maxLat - minLat || 0.0001;
@@ -41,22 +41,22 @@
 		ctx.lineCap = 'round';
 		ctx.lineJoin = 'round';
 
-		let prevModeId = track[0].mode_id;
+		let prevMode = track[0].m;
 		ctx.beginPath();
-		ctx.strokeStyle = getModeColor(prevModeId);
-		ctx.moveTo(toX(track[0].lon_deg), toY(track[0].lat_deg));
+		ctx.strokeStyle = getModeColor(prevMode);
+		ctx.moveTo(toX(track[0].lon), toY(track[0].lat));
 
 		for (let i = 1; i < track.length; i++) {
 			const pt = track[i];
-			const x = toX(pt.lon_deg);
-			const y = toY(pt.lat_deg);
-			if (pt.mode_id !== prevModeId) {
+			const x = toX(pt.lon);
+			const y = toY(pt.lat);
+			if (pt.m !== prevMode) {
 				ctx.lineTo(x, y);
 				ctx.stroke();
 				ctx.beginPath();
-				ctx.strokeStyle = getModeColor(pt.mode_id);
+				ctx.strokeStyle = getModeColor(pt.m);
 				ctx.moveTo(x, y);
-				prevModeId = pt.mode_id;
+				prevMode = pt.m;
 			} else {
 				ctx.lineTo(x, y);
 			}
@@ -64,16 +64,16 @@
 		ctx.stroke();
 
 		// Start marker
-		const sx = toX(track[0].lon_deg);
-		const sy = toY(track[0].lat_deg);
+		const sx = toX(track[0].lon);
+		const sy = toY(track[0].lat);
 		ctx.beginPath();
 		ctx.arc(sx, sy, 3, 0, Math.PI * 2);
 		ctx.fillStyle = '#22c55e';
 		ctx.fill();
 
 		// End marker
-		const ex = toX(track[track.length - 1].lon_deg);
-		const ey = toY(track[track.length - 1].lat_deg);
+		const ex = toX(track[track.length - 1].lon);
+		const ey = toY(track[track.length - 1].lat);
 		ctx.beginPath();
 		ctx.arc(ex, ey, 3, 0, Math.PI * 2);
 		ctx.fillStyle = '#ef4444';
@@ -84,13 +84,12 @@
 		if (status !== 'idle') return;
 		status = 'loading';
 		try {
-			let meta = metadataCache.get(logId);
-			if (!meta) {
-				meta = await getMetadata(logId);
-				metadataCache.set(logId, meta);
+			let track = trackCache.get(logId);
+			if (!track) {
+				track = await getTrack(logId);
+				trackCache.set(logId, track);
 			}
-			const track = meta.analysis?.gps_track;
-			if (!track || track.length < 2) {
+			if (track.length < 2) {
 				status = 'no-gps';
 				return;
 			}

@@ -3,6 +3,7 @@
 	import type { LogRecord } from '$lib/types';
 	import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/formatters';
 	import { getHardwareName } from '$lib/utils/hardwareNames';
+	import FlightThumbnail from './FlightThumbnail.svelte';
 
 	let { logs, sortField, sortDir, onSort }: {
 		logs: LogRecord[];
@@ -65,6 +66,9 @@
 			<table class="min-w-full divide-y divide-gray-200">
 				<thead>
 					<tr>
+						<th scope="col" class="hidden lg:table-cell py-3.5 pl-3 pr-2 text-left text-sm font-semibold text-gray-900">
+							Track
+						</th>
 						{#each columns as col}
 							<th
 								scope="col"
@@ -82,6 +86,9 @@
 							class="hover:bg-gray-50 cursor-pointer"
 							onclick={() => handleRowClick(log.id)}
 						>
+							<td class="hidden lg:table-cell py-2 pl-3 pr-2">
+								<FlightThumbnail logId={log.id} width={120} height={72} />
+							</td>
 							{#each columns as col}
 								<td
 									class="whitespace-nowrap px-2 sm:px-3 py-3 sm:py-4 text-sm {col.key === 'sys_name' ? 'font-medium text-gray-900' : 'text-gray-500'} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"

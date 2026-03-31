@@ -75,6 +75,16 @@ export async function getMetadata(id: string): Promise<FlightMetadata> {
   return apiFetch(`/logs/${id}/data/metadata.json`);
 }
 
+export interface TrackPointCompact {
+  lat: number;
+  lon: number;
+  m: number; // mode_id
+}
+
+export async function getTrack(id: string): Promise<TrackPointCompact[]> {
+  return apiFetch(`/logs/${id}/track`);
+}
+
 export async function deleteLog(id: string, token: string): Promise<void> {
   const res = await fetch(`${BASE}/logs/${id}?token=${token}`, { method: 'DELETE' });
   if (!res.ok) throw new ApiError(res.status, await res.text());
