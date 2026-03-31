@@ -77,7 +77,7 @@
 	}
 </script>
 
-<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col h-full">
+<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col lg:h-full">
 	<!-- Controls -->
 	<div class="border-b border-gray-200 px-4 py-2 flex flex-wrap items-center gap-2">
 		<!-- Level filters -->

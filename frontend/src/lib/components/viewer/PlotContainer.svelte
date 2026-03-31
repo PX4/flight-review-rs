@@ -34,8 +34,8 @@
 </script>
 
 <!-- Tab bar -->
-<div class="border-b border-gray-200 px-4">
-	<div class="flex gap-4">
+<div class="border-b border-gray-200 px-4 overflow-x-auto">
+	<div class="flex gap-4 min-w-max">
 		{#each tabs as tab}
 			<button
 				class="border-b-2 px-1 py-2.5 text-sm font-medium {$activePanel === tab.id
@@ -60,7 +60,7 @@
 </div>
 
 <!-- Panel Area -->
-<div class="flex-1 overflow-y-auto p-4 space-y-4">
+<div class="flex-1 lg:overflow-y-auto p-4 space-y-4">
 	{#if $activePanel === 'plots'}
 		{#if $activePlots.length > 0}
 			{#each $activePlots as plot (plot.id)}

@@ -133,7 +133,7 @@
 	];
 </script>
 
-<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col h-full">
+<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col lg:h-full">
 	<!-- Controls -->
 	<div class="border-b border-gray-200 px-4 py-2 space-y-2">
 		<!-- View mode toggles -->
@@ -174,7 +174,7 @@
 	</div>
 
 	<!-- Table -->
-	<div class="flex-1 overflow-y-auto">
+	<div class="flex-1 overflow-auto">
 		<table class="min-w-full text-sm">
 			<thead class="sticky top-0 bg-gray-50 border-b border-gray-200">
 				<tr>

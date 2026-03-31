@@ -42,8 +42,8 @@
 	const vibe = $derived(vibrationBadge(vibration?.status));
 </script>
 
-<div class="border-b border-gray-200 bg-gray-50">
-	<dl class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-11 divide-x divide-gray-200">
+<div class="border-b border-gray-200 bg-gray-50 overflow-x-auto">
+	<dl class="flex divide-x divide-gray-200 min-w-max lg:min-w-full">
 		<div class="px-4 py-3">
 			<dt class="text-xs text-gray-500">Vehicle</dt>
 			<dd class="text-sm font-semibold text-gray-900 mt-0.5">{metadata.sys_name ?? '\u2014'}</dd>
