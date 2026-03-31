@@ -203,20 +203,33 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
 
                 // Extract GPS first-fix from vehicle_gps_position
                 if meta.gps_first_fix.is_none() && topic == "vehicle_gps_position" {
-                    if let (Ok(lat_parser), Ok(lon_parser), Ok(alt_parser)) = (
-                        data.flattened_format.get_field_parser::<i32>("lat"),
-                        data.flattened_format.get_field_parser::<i32>("lon"),
-                        data.flattened_format.get_field_parser::<i32>("alt"),
-                    ) {
-                        let lat = lat_parser.parse(data.data);
-                        let lon = lon_parser.parse(data.data);
-                        let alt = alt_parser.parse(data.data);
-                        // Only record if we have a valid fix (non-zero lat/lon)
-                        if lat != 0 && lon != 0 {
+                    // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
+                    let coords: Option<(f64, f64, f64)> =
+                        if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                            data.flattened_format.get_field_parser::<f64>("latitude_deg"),
+                            data.flattened_format.get_field_parser::<f64>("longitude_deg"),
+                            data.flattened_format.get_field_parser::<f64>("altitude_msl_m"),
+                        ) {
+                            Some((lat_p.parse(data.data), lon_p.parse(data.data), alt_p.parse(data.data)))
+                        } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                            data.flattened_format.get_field_parser::<i32>("lat"),
+                            data.flattened_format.get_field_parser::<i32>("lon"),
+                            data.flattened_format.get_field_parser::<i32>("alt"),
+                        ) {
+                            let lat = lat_p.parse(data.data);
+                            let lon = lon_p.parse(data.data);
+                            let alt = alt_p.parse(data.data);
+                            Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
+                        } else {
+                            None
+                        };
+
+                    if let Some((lat_deg, lon_deg, alt_m)) = coords {
+                        if lat_deg != 0.0 && lon_deg != 0.0 {
                             meta.gps_first_fix = Some(GpsPosition {
-                                lat_deg: lat as f64 * 1e-7,
-                                lon_deg: lon as f64 * 1e-7,
-                                alt_m: alt as f64 * 1e-3,
+                                lat_deg,
+                                lon_deg,
+                                alt_m,
                             });
                         }
                     }
