@@ -52,7 +52,19 @@
 		<ErrorBanner message={error} onRetry={loadData} />
 	</div>
 {:else if metadata && logRecord}
-	<div class="flex h-[calc(100vh-4rem)] flex-col overflow-hidden">
+	<div class="flex h-screen flex-col overflow-hidden">
+		<!-- Compact top bar -->
+		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0">
+			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700">
+				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M10.5 19.5L3 12m0 0l7.5-7.5M3 12h18" />
+				</svg>
+				Back to logs
+			</a>
+			<div class="flex-1"></div>
+			<img src="/flight-review-logo.svg" alt="Flight Review" class="h-7 w-auto opacity-60" />
+		</div>
+
 		<!-- Flight Summary Header -->
 		<FlightSummaryHeader {metadata} logId={logRecord.id} />
 
@@ -64,7 +76,7 @@
 		<!-- Main area: sidebar + plots -->
 		<div class="flex flex-1 overflow-hidden">
 			<!-- Topic Tree Sidebar -->
-			<div class="hidden lg:flex lg:w-72 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0">
+			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0">
 				<TopicTreeSidebar {metadata} />
 			</div>
 

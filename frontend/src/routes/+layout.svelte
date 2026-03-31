@@ -5,6 +5,9 @@
 	import '../app.css';
 
 	let { children } = $props<{ children: Snippet }>();
+
+	// Hide the main nav sidebar on log viewer pages — it has its own topic tree sidebar
+	let isLogViewer = $derived(page.url.pathname.startsWith('/log/'));
 </script>
 
 <svelte:head>
@@ -16,8 +19,10 @@
 	/>
 </svelte:head>
 
-<NavBar currentPath={page.url.pathname} />
+{#if !isLogViewer}
+	<NavBar currentPath={page.url.pathname} />
+{/if}
 
-<main class="lg:pl-72">
+<main class={isLogViewer ? '' : 'lg:pl-72'}>
 	{@render children()}
 </main>
