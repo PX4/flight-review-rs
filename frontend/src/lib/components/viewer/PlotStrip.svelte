@@ -1,6 +1,10 @@
 <script lang="ts">
+	import { onMount, onDestroy } from 'svelte';
+	import uPlot from 'uplot';
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
 	import { activePlots } from '$lib/stores/logViewer';
+	import { timeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
+	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 
 	let { config, logId, metadata } = $props<{
 		config: PlotConfig;
@@ -8,12 +12,152 @@
 		metadata: FlightMetadata;
 	}>();
 
+	// Module-level session cache (shared across all PlotStrip instances)
+	const sessionCache = (globalThis as any).__plotSessionCache ??= new Map<string, LogSession>();
+
+	let containerEl: HTMLDivElement | undefined = $state();
+	let chartEl: HTMLDivElement | undefined = $state();
+	let uplot: uPlot | null = null;
+	let resizeObserver: ResizeObserver | null = null;
+
+	let loading = $state(true);
+	let error = $state<string | null>(null);
+
+	// Guard against infinite loops when syncing scales
+	let settingScale = false;
+
+	async function getSession(): Promise<LogSession> {
+		if (sessionCache.has(logId)) return sessionCache.get(logId)!;
+		const db = await initDuckDB();
+		const session = new LogSession(db, logId);
+		sessionCache.set(logId, session);
+		return session;
+	}
+
 	function removePlot() {
 		activePlots.update((plots) => plots.filter((p) => p.id !== config.id));
 	}
+
+	onMount(async () => {
+		try {
+			const session = await getSession();
+			const result = await session.queryTopic(config.topic, config.fields, {
+				multiId: config.multiId
+			});
+
+			if (!result) {
+				error = 'No data returned';
+				loading = false;
+				return;
+			}
+
+			const data: uPlot.AlignedData = [result.timestamps, ...result.series];
+
+			const containerWidth = containerEl?.clientWidth ?? 800;
+
+			const opts: uPlot.Options = {
+				width: containerWidth,
+				height: 200,
+				cursor: {
+					sync: { key: SYNC_KEY, setSeries: true },
+				},
+				scales: {
+					x: { time: false },
+				},
+				axes: [
+					{
+						stroke: '#9ca3af',
+						grid: { stroke: '#e5e7eb' },
+					},
+					{
+						stroke: '#9ca3af',
+						grid: { stroke: '#e5e7eb' },
+						label: config.yLabel || undefined,
+					},
+				],
+				hooks: {
+					setScale: [
+						(u: uPlot, scaleKey: string) => {
+							if (scaleKey !== 'x' || settingScale) return;
+							const min = u.scales.x.min;
+							const max = u.scales.x.max;
+							if (min != null && max != null) {
+								timeRange.set([min, max]);
+							}
+						},
+					],
+					setCursor: [
+						(u: uPlot) => {
+							const idx = u.cursor.idx;
+							if (idx != null && data[0]) {
+								cursorTimestamp.set(data[0][idx]);
+							}
+						},
+					],
+				},
+				series: [
+					{}, // x-axis series
+					...config.fields.map((field: string, i: number) => ({
+						label: field,
+						stroke: config.colors[i] ?? '#818cf8',
+						width: 1.5,
+					})),
+				],
+			};
+
+			if (chartEl) {
+				uplot = new uPlot(opts, data, chartEl);
+			}
+
+			// Observe container resize
+			if (containerEl) {
+				resizeObserver = new ResizeObserver((entries) => {
+					for (const entry of entries) {
+						const w = entry.contentRect.width;
+						if (uplot && w > 0) {
+							uplot.setSize({ width: w, height: 200 });
+						}
+					}
+				});
+				resizeObserver.observe(containerEl);
+			}
+
+			loading = false;
+		} catch (e) {
+			console.error('PlotStrip mount error:', e);
+			error = e instanceof Error ? e.message : 'Failed to load data';
+			loading = false;
+		}
+	});
+
+	// React to timeRange changes from other plots
+	$effect(() => {
+		const range = $timeRange;
+		if (!uplot || settingScale) return;
+		if (range) {
+			settingScale = true;
+			uplot.setScale('x', { min: range[0], max: range[1] });
+			settingScale = false;
+		}
+	});
+
+	onDestroy(() => {
+		if (uplot) {
+			uplot.destroy();
+			uplot = null;
+		}
+		if (resizeObserver) {
+			resizeObserver.disconnect();
+			resizeObserver = null;
+		}
+	});
 </script>
 
-<div class="rounded-lg ring-1 ring-gray-200 bg-white overflow-hidden">
+<svelte:head>
+	<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/uPlot.min.css" />
+</svelte:head>
+
+<div class="rounded-lg ring-1 ring-gray-200 bg-white overflow-hidden" bind:this={containerEl}>
 	<div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
 		<div class="flex items-center gap-4">
 			<span class="text-sm font-medium text-gray-900">{config.topic}</span>
@@ -32,16 +176,25 @@
 			</svg>
 		</button>
 	</div>
-	<div class="relative h-48 bg-gray-50 flex items-center justify-center">
-		<!-- MVP placeholder - real uPlot integration in follow-up -->
-		<svg class="w-3/4 h-3/4 opacity-20" viewBox="0 0 800 180" preserveAspectRatio="none">
-			<path
-				d="M40 90 C80 50, 120 130, 160 80 C200 40, 240 110, 280 70 C320 40, 360 120, 400 85 C440 60, 480 100, 520 75 C560 50, 600 110, 640 80 C680 55, 720 95, 760 70"
-				fill="none"
-				stroke="#9ca3af"
-				stroke-width="1.5"
-			/>
-		</svg>
-		<p class="absolute text-sm text-gray-400">Data visualization coming soon</p>
+	<div class="relative bg-gray-50" style="min-height: 200px;">
+		{#if loading}
+			<div class="absolute inset-0 flex items-center justify-center">
+				<svg class="size-6 animate-spin text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+					<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+					<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+				</svg>
+				<span class="ml-2 text-sm text-gray-400">Loading data...</span>
+			</div>
+		{:else if error}
+			<div class="absolute inset-0 flex items-center justify-center">
+				<div class="text-center">
+					<svg class="size-8 text-red-300 mx-auto mb-2" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
+					</svg>
+					<p class="text-sm text-red-500">{error}</p>
+				</div>
+			</div>
+		{/if}
+		<div bind:this={chartEl}></div>
 	</div>
 </div>

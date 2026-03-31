@@ -24,6 +24,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@duckdb/duckdb-wasm": "^1.33.1-dev20.0",
     "chart.js": "^4.5.1",
     "uplot": "^1.6.31"
   },

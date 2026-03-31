@@ -1,13 +1,19 @@
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { FlightMetadata } from '$lib/types';
 	import { activePlots, activePanel } from '$lib/stores/logViewer';
 	import { timeRange } from '$lib/stores/plotSync';
+	import { terminateDuckDB } from '$lib/utils/duckdb';
 	import PlotStrip from './PlotStrip.svelte';
 	import MapPanel from './MapPanel.svelte';
 	import LogMessagesPanel from './LogMessagesPanel.svelte';
 	import ParamDiffPanel from './ParamDiffPanel.svelte';
 
 	let { metadata, logId } = $props<{ metadata: FlightMetadata; logId: string }>();
+
+	onDestroy(() => {
+		terminateDuckDB();
+	});
 
 	const tabs = [
 		{ id: 'plots' as const, label: 'Plots' },
