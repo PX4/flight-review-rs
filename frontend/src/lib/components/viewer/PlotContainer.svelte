@@ -83,6 +83,8 @@
 		<ParamDiffPanel
 			diffs={metadata.analysis?.non_default_params ?? []}
 			changedParams={metadata.changed_parameters}
+			allParameters={metadata.parameters}
+			defaultParameters={metadata.default_parameters}
 		/>
 	{/if}
 </div>
