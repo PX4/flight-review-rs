@@ -221,7 +221,7 @@
 			<div class="p-4 text-sm text-red-600">{error}</div>
 		{/if}
 		<div class="relative">
-			<div bind:this={mapContainer} class="h-96 w-full"></div>
+			<div bind:this={mapContainer} class="h-56 sm:h-72 lg:h-96 w-full"></div>
 			{#if !loaded && !error}
 				<div class="absolute inset-0 flex items-center justify-center bg-gray-50">
 					<div class="flex items-center gap-2 text-sm text-gray-500">

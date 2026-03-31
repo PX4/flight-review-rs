@@ -19,7 +19,7 @@
 	}
 </script>
 
-<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+<div class="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
 	{#if loading}
 		{#each Array(4) as _}
 			<div class="animate-pulse rounded-lg bg-white p-4 sm:p-6 ring-1 ring-gray-200">

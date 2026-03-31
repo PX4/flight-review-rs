@@ -192,7 +192,7 @@
 	</div>
 
 	<!-- Charts grid: single column on mobile, 2 columns on lg+ -->
-	<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+	<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
 		<HardwareBars data={hwData} loading={loadingHw} onBarClick={handleHardwareClick} />
 		<VehicleTypeDonut data={vehicleData} loading={loadingVehicle} />
 		<DurationHistogram data={durationData} loading={loadingDuration} />

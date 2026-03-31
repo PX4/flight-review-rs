@@ -30,7 +30,7 @@
 <div class="mb-8">
 	<button
 		type="button"
-		class="flex w-full justify-center rounded-lg border-2 border-dashed px-6 py-16 transition-colors cursor-pointer {isDragOver
+		class="flex w-full justify-center rounded-lg border-2 border-dashed px-6 py-8 sm:py-16 transition-colors cursor-pointer {isDragOver
 			? 'border-indigo-500 bg-indigo-50'
 			: 'border-gray-300 hover:border-indigo-500/50'}"
 		ondragover={(e) => {
@@ -46,7 +46,7 @@
 	>
 		<div class="text-center">
 			<svg
-				class="mx-auto size-12 text-gray-500"
+				class="mx-auto size-8 sm:size-12 text-gray-500"
 				fill="none"
 				viewBox="0 0 24 24"
 				stroke-width="1"

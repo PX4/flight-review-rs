@@ -22,6 +22,7 @@
 
 	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let plotHeight = $state(200);
 
 	// Guard against infinite loops when syncing scales
 	let settingScale = false;
@@ -54,10 +55,11 @@
 			const data: uPlot.AlignedData = [result.timestamps, ...result.series];
 
 			const containerWidth = containerEl?.clientWidth ?? 800;
+			plotHeight = containerWidth < 640 ? 140 : 200;
 
 			const opts: uPlot.Options = {
 				width: containerWidth,
-				height: 200,
+				height: plotHeight,
 				cursor: {
 					sync: { key: SYNC_KEY, setSeries: true },
 				},
@@ -114,8 +116,11 @@
 				resizeObserver = new ResizeObserver((entries) => {
 					for (const entry of entries) {
 						const w = entry.contentRect.width;
-						if (uplot && w > 0) {
-							uplot.setSize({ width: w, height: 200 });
+						if (w > 0) {
+							plotHeight = w < 640 ? 140 : 200;
+							if (uplot) {
+								uplot.setSize({ width: w, height: plotHeight });
+							}
 						}
 					}
 				});
@@ -158,10 +163,10 @@
 </svelte:head>
 
 <div class="rounded-lg ring-1 ring-gray-200 bg-white overflow-hidden" bind:this={containerEl}>
-	<div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-100">
-		<div class="flex items-center gap-4">
-			<span class="text-sm font-medium text-gray-900">{config.topic}</span>
-			<div class="flex items-center gap-3 text-xs">
+	<div class="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-gray-100">
+		<div class="flex flex-wrap items-center gap-2 sm:gap-4">
+			<span class="text-xs sm:text-sm font-medium text-gray-900">{config.topic}</span>
+			<div class="flex flex-wrap items-center gap-x-1.5 sm:gap-x-3 gap-y-1 text-xs">
 				{#each config.fields as field, i}
 					<span class="flex items-center gap-1.5">
 						<span class="w-3 h-0.5 rounded" style="background-color: {config.colors[i] ?? '#818cf8'};"></span>
@@ -176,7 +181,7 @@
 			</svg>
 		</button>
 	</div>
-	<div class="relative bg-gray-50" style="min-height: 200px;">
+	<div class="relative bg-gray-50" style="min-height: {plotHeight}px;">
 		{#if loading}
 			<div class="absolute inset-0 flex items-center justify-center">
 				<svg class="size-6 animate-spin text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

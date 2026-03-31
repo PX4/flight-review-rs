@@ -68,7 +68,7 @@
 						{#each columns as col}
 							<th
 								scope="col"
-								class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 {col.sortable ? 'cursor-pointer select-none hover:text-indigo-600' : ''} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
+								class="px-2 sm:px-3 py-3.5 text-left text-sm font-semibold text-gray-900 {col.sortable ? 'cursor-pointer select-none hover:text-indigo-600' : ''} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
 								onclick={() => col.sortable && onSort(col.key)}
 							>
 								{col.label}{sortIndicator(col.key)}
@@ -84,7 +84,7 @@
 						>
 							{#each columns as col}
 								<td
-									class="whitespace-nowrap px-3 py-4 text-sm {col.key === 'sys_name' ? 'font-medium text-gray-900' : 'text-gray-500'} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
+									class="whitespace-nowrap px-2 sm:px-3 py-3 sm:py-4 text-sm {col.key === 'sys_name' ? 'font-medium text-gray-900' : 'text-gray-500'} {col.hiddenMobile ? 'hidden sm:table-cell' : ''}"
 								>
 									{cellValue(log, col.key)}
 								</td>

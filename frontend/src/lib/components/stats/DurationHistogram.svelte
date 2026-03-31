@@ -85,7 +85,7 @@
 	{:else if data.length === 0}
 		<p class="text-sm text-gray-400 py-8 text-center">No data available</p>
 	{:else}
-		<div style="height: 240px">
+		<div class="h-[180px] sm:h-[240px]">
 			<canvas bind:this={canvasEl}></canvas>
 		</div>
 	{/if}

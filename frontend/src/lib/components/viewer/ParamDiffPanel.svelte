@@ -197,7 +197,7 @@
 						Default{sortArrow('default')}
 					</th>
 					<th
-						class="text-right px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none"
+						class="text-right px-3 sm:px-4 py-2 font-medium text-gray-700 cursor-pointer select-none hidden sm:table-cell"
 						onclick={() => toggleSort('delta')}
 					>
 						Delta{sortArrow('delta')}
@@ -250,7 +250,7 @@
 							{formatNumber(diff.default)}
 						</td>
 						<td
-							class="px-3 sm:px-4 py-1.5 text-right font-mono text-xs {isNonDefault
+							class="px-3 sm:px-4 py-1.5 text-right font-mono text-xs hidden sm:table-cell {isNonDefault
 								? getDeltaColor(pct)
 								: 'text-gray-300'}"
 						>

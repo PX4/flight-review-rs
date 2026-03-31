@@ -115,7 +115,7 @@
 		<!-- Main area: sidebar + content -->
 		<div class="flex min-h-[50vh] lg:flex-1 lg:min-h-0 lg:overflow-hidden">
 			<!-- Topic Tree Sidebar (desktop) -->
-			<div class="hidden lg:flex lg:w-64 lg:flex-col lg:border-r lg:border-gray-200 bg-white shrink-0 dark:lg:border-gray-700 dark:bg-gray-900">
+			<div class="hidden md:flex md:w-52 lg:w-64 md:flex-col md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900">
 				<TopicTreeSidebar {metadata} />
 			</div>
 
@@ -127,7 +127,7 @@
 						{#each tabs as tab}
 							<a
 								href="{logBase}{tab.href}"
-								class="border-b-2 px-1 py-2.5 text-sm font-medium {activeTab === tab.href
+								class="border-b-2 px-0.5 sm:px-1 py-2 sm:py-2.5 text-xs sm:text-sm font-medium {activeTab === tab.href
 									? 'border-indigo-500 text-indigo-600'
 									: 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
 								data-sveltekit-noscroll
@@ -159,7 +159,7 @@
 	<!-- Floating "Topics" button for mobile -->
 	<button
 		onclick={() => (mobileTopicsOpen = true)}
-		class="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-indigo-500 lg:hidden"
+		class="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-indigo-500 md:hidden"
 		aria-label="Open topic tree"
 	>
 		<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -170,7 +170,7 @@
 
 	<!-- Mobile topic sidebar slide-over -->
 	{#if mobileTopicsOpen}
-		<div class="fixed inset-0 z-50 lg:hidden">
+		<div class="fixed inset-0 z-50 md:hidden">
 			<div
 				class="fixed inset-0 bg-gray-900/80"
 				onclick={() => (mobileTopicsOpen = false)}

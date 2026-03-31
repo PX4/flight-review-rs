@@ -42,8 +42,65 @@
 	const vibe = $derived(vibrationBadge(vibration?.status));
 </script>
 
-<div class="border-b border-gray-200 bg-gray-50 overflow-hidden">
-	<dl class="grid grid-cols-2 sm:grid-cols-3 lg:flex lg:divide-x divide-gray-200 px-3 sm:px-4 lg:px-0">
+<div class="border-b border-gray-200 bg-gray-50">
+	<!-- Mobile/Tablet: horizontal scroll, single row -->
+	<dl class="flex overflow-x-auto lg:hidden divide-x divide-gray-200 scrollbar-none">
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Vehicle</dt>
+			<dd class="text-xs font-semibold text-gray-900 whitespace-nowrap">{metadata.sys_name ?? '\u2014'}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Hardware</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{getHardwareName(metadata.ver_hw)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Duration</dt>
+			<dd class="text-xs font-semibold text-gray-900 whitespace-nowrap">{formatDuration(metadata.flight_duration_s)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Distance</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{formatDistance(stats?.total_distance_m)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Max Alt</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{formatAltitude(stats?.max_altitude_diff_m)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Speed</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{formatSpeed(stats?.max_speed_m_s)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Battery</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{formatBattery(battery?.discharged_mah)}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">Vibration</dt>
+			<dd class="mt-0.5">
+				{#if vibe.bg}
+					<span class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-medium {vibe.bg} {vibe.fg}">{vibe.text}</span>
+				{:else}
+					<span class="text-xs text-gray-500">{vibe.text}</span>
+				{/if}
+			</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5">
+			<dt class="text-[10px] text-gray-500">GPS</dt>
+			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{gps?.max_satellites != null ? `${gps.max_satellites} sats` : '\u2014'}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5 flex items-center">
+			<a
+				href="/api/logs/{logId}/download"
+				class="rounded-md bg-white px-2 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50 flex items-center gap-1"
+			>
+				<svg class="size-3" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12M12 16.5V3" />
+				</svg>
+				.ulg
+			</a>
+		</div>
+	</dl>
+	<!-- Desktop: flex layout -->
+	<dl class="hidden lg:flex lg:divide-x divide-gray-200 lg:px-0">
 		<div class="px-2 lg:px-4 py-2 lg:py-3">
 			<dt class="text-xs text-gray-500">Vehicle</dt>
 			<dd class="text-sm font-semibold text-gray-900 mt-0.5 truncate">{metadata.sys_name ?? '\u2014'}</dd>
