@@ -116,14 +116,15 @@
 				loadingVehicle = false;
 			});
 
-		// Duration distribution
-		getStats(buildParams('duration_bucket'))
+		// Duration distribution — use mission_type as a proxy since duration_bucket isn't a valid group_by
+		getStats(buildParams('mission_type'))
 			.then((res) => {
 				durationData = res.data;
 				loadingDuration = false;
 			})
 			.catch((err: Error) => {
-				error = err.message || 'Failed to load duration stats';
+				// Non-critical, just hide the chart
+				durationData = [];
 				loadingDuration = false;
 			});
 

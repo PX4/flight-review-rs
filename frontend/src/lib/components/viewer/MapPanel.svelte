@@ -13,6 +13,7 @@
 	let cursorMarker: any = null;
 	let loaded = $state(false);
 	let error = $state('');
+	let debugInfo = $state('');
 
 	// Build GeoJSON segments colored by flight mode
 	function buildTrackGeoJSON(): GeoJSON.FeatureCollection {
@@ -84,7 +85,11 @@
 		try {
 			// Dynamic import — MapLibre is ~200KB
 			const ml = await import('maplibre-gl');
-			maplibregl = ml.default || ml;
+			maplibregl = ml.Map ? ml : ml.default;
+			if (!maplibregl?.Map) {
+				error = 'MapLibre failed to load — Map constructor not found';
+				return;
+			}
 
 			// Import CSS
 			await import('maplibre-gl/dist/maplibre-gl.css');
