@@ -26,7 +26,7 @@
   "dependencies": {
     "@duckdb/duckdb-wasm": "^1.33.1-dev20.0",
     "chart.js": "^4.5.1",
-    "maplibre-gl": "^5.21.1",
+    "mapbox-gl": "^3.20.0",
     "uplot": "^1.6.31"
   },
   "type": "module"

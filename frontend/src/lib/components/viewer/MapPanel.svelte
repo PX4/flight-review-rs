@@ -9,18 +9,14 @@
 
 	let mapContainer = $state<HTMLDivElement>(undefined!);
 	let map: any = null;
-	let maplibregl: any = null;
 	let cursorMarker: any = null;
 	let loaded = $state(false);
 	let error = $state('');
-	let debugInfo = $state('');
 
-	// Build GeoJSON segments colored by flight mode
 	function buildTrackGeoJSON(): GeoJSON.FeatureCollection {
 		if (track.length < 2) {
 			return { type: 'FeatureCollection', features: [] };
 		}
-
 		const features: GeoJSON.Feature[] = [];
 		let currentModeId = track[0].mode_id;
 		let coords: [number, number][] = [[track[0].lon_deg, track[0].lat_deg]];
@@ -28,7 +24,6 @@
 		for (let i = 1; i < track.length; i++) {
 			const pt = track[i];
 			if (pt.mode_id !== currentModeId) {
-				// Close segment with this point for continuity
 				coords.push([pt.lon_deg, pt.lat_deg]);
 				features.push({
 					type: 'Feature',
@@ -48,7 +43,6 @@
 				geometry: { type: 'LineString', coordinates: coords },
 			});
 		}
-
 		return { type: 'FeatureCollection', features };
 	}
 
@@ -79,51 +73,46 @@
 		return closest;
 	}
 
+	function findClosestByLngLat(lng: number, lat: number): TrackPoint | null {
+		if (track.length === 0) return null;
+		let closest = track[0];
+		let bestDist = (closest.lon_deg - lng) ** 2 + (closest.lat_deg - lat) ** 2;
+		for (let i = 1; i < track.length; i++) {
+			const d = (track[i].lon_deg - lng) ** 2 + (track[i].lat_deg - lat) ** 2;
+			if (d < bestDist) {
+				bestDist = d;
+				closest = track[i];
+			}
+		}
+		return closest;
+	}
+
 	onMount(async () => {
 		if (track.length === 0) return;
+		if (!PUBLIC_MAPBOX_TOKEN) {
+			error = 'Mapbox token not configured';
+			return;
+		}
 
 		try {
-			// Dynamic import — MapLibre is ~200KB
-			const ml = await import('maplibre-gl');
-			maplibregl = ml.Map ? ml : ml.default;
-			if (!maplibregl?.Map) {
-				error = 'MapLibre failed to load — Map constructor not found';
-				return;
-			}
+			const mapboxgl = await import('mapbox-gl');
+			await import('mapbox-gl/dist/mapbox-gl.css');
 
-			// Import CSS
-			await import('maplibre-gl/dist/maplibre-gl.css');
+			const mb = mapboxgl.default || mapboxgl;
+			mb.accessToken = PUBLIC_MAPBOX_TOKEN;
 
-			const style = PUBLIC_MAPBOX_TOKEN
-				? `https://api.mapbox.com/styles/v1/mapbox/outdoors-v12?access_token=${PUBLIC_MAPBOX_TOKEN}`
-				: {
-						version: 8 as const,
-						sources: {
-							osm: {
-								type: 'raster' as const,
-								tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
-								tileSize: 256,
-								attribution: '© OpenStreetMap contributors',
-							},
-						},
-						layers: [{ id: 'osm', type: 'raster' as const, source: 'osm' }],
-					};
-
-			map = new maplibregl.Map({
+			map = new mb.Map({
 				container: mapContainer,
-				style,
+				style: 'mapbox://styles/mapbox/outdoors-v12',
 				attributionControl: true,
 			});
 
 			map.on('load', () => {
 				loaded = true;
 
-				// Add track source
 				const geojson = buildTrackGeoJSON();
 				map.addSource('track', { type: 'geojson', data: geojson });
 
-				// Add a line layer per feature (each has its own color)
-				// Use a data-driven style for the color
 				map.addLayer({
 					id: 'track-line',
 					type: 'line',
@@ -142,23 +131,23 @@
 				// Start marker
 				const startEl = document.createElement('div');
 				startEl.className = 'w-4 h-4 rounded-full bg-emerald-500 border-2 border-white shadow-md';
-				new maplibregl.Marker({ element: startEl })
+				new mb.Marker({ element: startEl })
 					.setLngLat([track[0].lon_deg, track[0].lat_deg])
-					.setPopup(new maplibregl.Popup({ offset: 10 }).setText('Start'))
+					.setPopup(new mb.Popup({ offset: 10 }).setText('Start'))
 					.addTo(map);
 
 				// End marker
 				const endEl = document.createElement('div');
 				endEl.className = 'w-4 h-4 rounded-full bg-red-500 border-2 border-white shadow-md';
-				new maplibregl.Marker({ element: endEl })
+				new mb.Marker({ element: endEl })
 					.setLngLat([track[track.length - 1].lon_deg, track[track.length - 1].lat_deg])
-					.setPopup(new maplibregl.Popup({ offset: 10 }).setText('End'))
+					.setPopup(new mb.Popup({ offset: 10 }).setText('End'))
 					.addTo(map);
 
-				// Cursor marker (will be moved by store subscription)
+				// Cursor marker
 				const cursorEl = document.createElement('div');
 				cursorEl.className = 'w-3 h-3 rounded-full bg-indigo-500 border-2 border-white shadow-lg';
-				cursorMarker = new maplibregl.Marker({ element: cursorEl })
+				cursorMarker = new mb.Marker({ element: cursorEl })
 					.setLngLat([track[0].lon_deg, track[0].lat_deg])
 					.addTo(map);
 
@@ -191,25 +180,10 @@
 		}
 	});
 
-	function findClosestByLngLat(lng: number, lat: number): TrackPoint | null {
-		if (track.length === 0) return null;
-		let closest = track[0];
-		let bestDist = (closest.lon_deg - lng) ** 2 + (closest.lat_deg - lat) ** 2;
-		for (let i = 1; i < track.length; i++) {
-			const d = (track[i].lon_deg - lng) ** 2 + (track[i].lat_deg - lat) ** 2;
-			if (d < bestDist) {
-				bestDist = d;
-				closest = track[i];
-			}
-		}
-		return closest;
-	}
-
 	// Sync cursor marker position
 	$effect(() => {
 		const ts = $cursorTimestamp;
 		if (!cursorMarker || ts == null || track.length === 0) return;
-		// cursorTimestamp is in seconds, track timestamps in microseconds
 		const pt = findClosestPoint(ts * 1e6);
 		if (pt) {
 			cursorMarker.setLngLat([pt.lon_deg, pt.lat_deg]);
@@ -220,15 +194,9 @@
 	$effect(() => {
 		const range = $timeRange;
 		if (!map || !loaded) return;
-		// For now, just update opacity — full range filtering would require splitting the GeoJSON
-		// This is a visual hint, not a data filter
 		const layer = map.getLayer('track-line');
 		if (!layer) return;
-		if (range) {
-			map.setPaintProperty('track-line', 'line-opacity', 0.5);
-		} else {
-			map.setPaintProperty('track-line', 'line-opacity', 0.9);
-		}
+		map.setPaintProperty('track-line', 'line-opacity', range ? 0.5 : 0.9);
 	});
 
 	onDestroy(() => {
@@ -266,7 +234,6 @@
 				</div>
 			{/if}
 		</div>
-		<!-- Legend -->
 		<div class="flex items-center gap-4 px-4 py-2 border-t border-gray-100 text-xs text-gray-500">
 			<span class="flex items-center gap-1">
 				<span class="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white shadow-sm"></span>
