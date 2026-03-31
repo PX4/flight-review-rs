@@ -53,8 +53,8 @@
 		<ErrorBanner message={error} onRetry={loadData} />
 	</div>
 {:else if metadata && logRecord}
-	<!-- Mobile: everything scrolls. Desktop: header/timeline fixed, plot area scrolls independently -->
-	<div class="flex h-screen flex-col overflow-y-auto lg:overflow-hidden">
+	<!-- Mobile: everything scrolls vertically, horizontal overflow contained. Desktop: header/timeline fixed, plot area scrolls independently -->
+	<div class="flex h-screen flex-col overflow-x-hidden overflow-y-auto lg:overflow-hidden">
 		<!-- Compact top bar -->
 		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0 dark:border-gray-700 dark:bg-gray-900">
 			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
