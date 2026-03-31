@@ -332,8 +332,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     let mut topics_initialized: HashMap<String, bool> = HashMap::new();
 
     read_file_with_simple_callback(path, &mut |msg| {
-        match msg {
-            Message::Data(data) => {
+        if let Message::Data(data) = msg {
                 let topic = data.flattened_format.message_name.as_str();
                 let ts = data
                     .flattened_format
@@ -417,8 +416,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                                     || current_in_transition != Some(it_val);
                                 if changed {
                                     // Close previous VTOL segment
-                                    if current_vehicle_type.is_some() {
-                                        let prev_vt = current_vehicle_type.unwrap();
+                                    if let Some(prev_vt) = current_vehicle_type {
                                         let prev_it = current_in_transition.unwrap_or(false);
                                         analysis.vtol_states.push(VtolStateSegment {
                                             state: vtol_state_name(prev_vt, prev_it).to_string(),
@@ -706,8 +704,6 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                     _ => {}
                 }
             }
-            _ => {}
-        }
         SimpleCallbackResult::KeepReading
     })?;
 
@@ -880,17 +876,25 @@ mod tests {
 
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        std::path::Path::new(manifest)
-            .parent()
-            .unwrap() // crates/
-            .parent()
-            .unwrap() // workspace root
-            .parent()
-            .unwrap() // ulog/
+
+        // First: check local fixtures in the converter crate
+        let local = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .join("crates/converter/tests/fixtures")
+            .join(name);
+        if local.exists() {
+            return local.to_string_lossy().to_string();
+        }
+
+        // Fallback: px4-ulog-rs repo (local dev)
+        let external = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .parent().unwrap()  // ulog/
             .join("px4-ulog-rs/tests/fixtures")
-            .join(name)
-            .to_string_lossy()
-            .to_string()
+            .join(name);
+        external.to_string_lossy().to_string()
     }
 
     #[test]
@@ -908,6 +912,10 @@ mod tests {
     #[test]
     fn test_analyze_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("Skipping: fixed_wing_gps.ulg not available");
+            return;
+        }
         let meta = extract_metadata(&path).unwrap();
         let analysis = analyze(&path, &meta).unwrap();
 
@@ -948,6 +956,10 @@ mod tests {
     #[test]
     fn test_field_stats_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("Skipping: fixed_wing_gps.ulg not available");
+            return;
+        }
         let meta = extract_metadata(&path).unwrap();
         let analysis = analyze(&path, &meta).unwrap();
 

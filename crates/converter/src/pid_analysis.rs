@@ -13,6 +13,9 @@ use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::f64::consts::PI;
 
+/// A time series of (time_seconds, value) pairs.
+type TimeSeries = Vec<(f64, f64)>;
+
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
@@ -193,7 +196,7 @@ fn analyze_axis(path: &str, axis: &str) -> Result<Option<PidStepResponse>, std::
 fn extract_signals(
     path: &str,
     axis: &str,
-) -> Result<(Vec<(f64, f64)>, Vec<(f64, f64)>), std::io::Error> {
+) -> Result<(TimeSeries, TimeSeries), std::io::Error> {
     let setpoint_field = match axis {
         "roll" => "roll",
         "pitch" => "pitch",
@@ -212,8 +215,7 @@ fn extract_signals(
     let mut gyro_data: Vec<(f64, f64)> = Vec::new();
 
     read_file_with_simple_callback(path, &mut |msg| {
-        match msg {
-            Message::Data(data) => {
+        if let Message::Data(data) = msg {
                 let topic = data.flattened_format.message_name.as_str();
                 let ts = data
                     .flattened_format
@@ -247,8 +249,6 @@ fn extract_signals(
                     _ => {}
                 }
             }
-            _ => {}
-        }
         SimpleCallbackResult::KeepReading
     })?;
 
@@ -398,8 +398,8 @@ fn wiener_step_response(
     let resp_len = response_len.min(fft_len);
     let mut step = Vec::with_capacity(resp_len);
     let mut cumsum = 0.0;
-    for i in 0..resp_len {
-        let impulse_val = h[i].re * scale;
+    for item in h.iter().take(resp_len) {
+        let impulse_val = item.re * scale;
         if impulse_val.is_finite() {
             cumsum += impulse_val;
         }
@@ -474,17 +474,25 @@ mod tests {
 
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        std::path::Path::new(manifest)
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
+
+        // First: check local fixtures in the converter crate
+        let local = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .join("crates/converter/tests/fixtures")
+            .join(name);
+        if local.exists() {
+            return local.to_string_lossy().to_string();
+        }
+
+        // Fallback: px4-ulog-rs repo (local dev)
+        let external = std::path::Path::new(manifest)
+            .parent().unwrap()  // crates/
+            .parent().unwrap()  // workspace root
+            .parent().unwrap()  // ulog/
             .join("px4-ulog-rs/tests/fixtures")
-            .join(name)
-            .to_string_lossy()
-            .to_string()
+            .join(name);
+        external.to_string_lossy().to_string()
     }
 
     #[test]
@@ -524,6 +532,10 @@ mod tests {
     #[test]
     fn test_pid_analysis_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
+        if !std::path::Path::new(&path).exists() {
+            eprintln!("Skipping: fixed_wing_gps.ulg not available");
+            return;
+        }
         let result = pid_analysis(&path).unwrap();
         // Should not error; may or may not have axes depending on log content
         for axis_result in &result.axes {
