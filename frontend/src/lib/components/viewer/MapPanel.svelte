@@ -207,7 +207,7 @@
 	});
 </script>
 
-<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden">
+<div class="rounded-lg bg-white ring-1 ring-gray-200 overflow-hidden flex flex-col flex-1">
 	{#if track.length === 0}
 		<div class="flex flex-col items-center justify-center py-24 text-center">
 			<svg class="size-12 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke-width="1" stroke="currentColor">
@@ -220,8 +220,8 @@
 		{#if error}
 			<div class="p-4 text-sm text-red-600">{error}</div>
 		{/if}
-		<div class="relative">
-			<div bind:this={mapContainer} class="h-56 sm:h-72 lg:h-96 w-full"></div>
+		<div class="relative flex-1 min-h-[50vh] lg:min-h-0">
+			<div bind:this={mapContainer} class="absolute inset-0 w-full h-full"></div>
 			{#if !loaded && !error}
 				<div class="absolute inset-0 flex items-center justify-center bg-gray-50">
 					<div class="flex items-center gap-2 text-sm text-gray-500">
