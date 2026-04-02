@@ -327,22 +327,37 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                 meta.sync_count += 1;
             }
             Message::MultiInfoMessage(msg) => {
+                // ULog multi_info protocol:
+                //   is_continued=false → first/new message for this key (flush any previous)
+                //   is_continued=true  → continuation of the current message
+                if !msg.is_continued {
+                    // Flush any previously buffered value for this key
+                    if let Some(buffer) = multi_info_buffers.remove(msg.key) {
+                        if !buffer.is_empty() {
+                            let value = String::from_utf8_lossy(&buffer).to_string();
+                            meta.multi_info
+                                .entry(msg.key.to_string())
+                                .or_default()
+                                .push(value);
+                        }
+                    }
+                }
                 let buffer = multi_info_buffers
                     .entry(msg.key.to_string())
                     .or_default();
                 buffer.extend_from_slice(msg.value);
-                if !msg.is_continued {
-                    let value = String::from_utf8_lossy(buffer).to_string();
-                    meta.multi_info
-                        .entry(msg.key.to_string())
-                        .or_default()
-                        .push(value);
-                    multi_info_buffers.remove(msg.key);
-                }
             }
         }
         SimpleCallbackResult::KeepReading
     })?;
+
+    // Flush any remaining multi_info buffers (last message for each key)
+    for (key, buffer) in multi_info_buffers {
+        if !buffer.is_empty() {
+            let value = String::from_utf8_lossy(&buffer).to_string();
+            meta.multi_info.entry(key).or_default().push(value);
+        }
+    }
 
     // Compute flight duration
     if let (Some(first), Some(last)) = (first_data_timestamp_us, last_data_timestamp_us) {
