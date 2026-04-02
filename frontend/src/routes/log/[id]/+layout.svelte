@@ -59,12 +59,19 @@
 	const hasGps = $derived(
 		metadata?.analysis?.gps_track != null && metadata.analysis.gps_track.length > 1
 	);
+	const hasSystemInfo = $derived.by(() => {
+		const mi = metadata?.multi_info;
+		if (mi == null) return false;
+		return ['boot_console_output', 'perf_top_preflight', 'perf_top_postflight', 'perf_counter_preflight', 'perf_counter_postflight']
+			.some(k => (mi[k]?.length ?? 0) > 0);
+	});
 
 	const tabs = $derived([
 		{ label: 'Plots', href: '' },
 		...(hasGps ? [{ label: 'Map', href: '/map' }] : []),
 		{ label: 'Messages', href: '/messages' },
 		{ label: 'Parameters', href: '/parameters' },
+		...(hasSystemInfo ? [{ label: 'System', href: '/system' }] : []),
 	]);
 
 	let activeTab = $derived.by(() => {
@@ -74,6 +81,7 @@
 		if (suffix === '/map') return '/map';
 		if (suffix === '/messages') return '/messages';
 		if (suffix === '/parameters') return '/parameters';
+		if (suffix === '/system') return '/system';
 		return '';
 	});
 

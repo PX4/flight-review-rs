@@ -82,6 +82,7 @@ export interface FlightMetadata {
   changed_parameters: ChangedParam[];
   default_parameters: Record<string, number>;
   analysis: FlightAnalysis | null;
+  multi_info?: Record<string, string[]>;
 }
 
 export interface TopicInfo {
