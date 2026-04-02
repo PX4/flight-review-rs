@@ -176,11 +176,17 @@
 	$effect(() => {
 		const range = $timeRange;
 		if (!uplot || settingScale) return;
+		settingScale = true;
 		if (range) {
-			settingScale = true;
 			uplot.setScale('x', { min: range[0], max: range[1] });
-			settingScale = false;
+		} else {
+			// Reset zoom: let uPlot auto-fit to full data range
+			const data = uplot.data;
+			if (data && data[0] && data[0].length > 0) {
+				uplot.setScale('x', { min: data[0][0], max: data[0][data[0].length - 1] });
+			}
 		}
+		settingScale = false;
 	});
 
 	onDestroy(() => {
