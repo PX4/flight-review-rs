@@ -128,7 +128,7 @@
 		<div class="flex flex-1 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
 			<!-- Topic Tree Sidebar (desktop, plots tab only) -->
 			{#if activeTab === ''}
-				<div class="hidden md:flex md:w-52 lg:w-64 md:flex-col md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900 sticky top-0 self-start max-h-dvh overflow-y-auto">
+				<div class="hidden md:flex md:w-52 lg:w-64 md:flex-col md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900 sticky top-0 self-start h-dvh overflow-y-auto">
 					<TopicTreeSidebar {metadata} />
 				</div>
 			{/if}
