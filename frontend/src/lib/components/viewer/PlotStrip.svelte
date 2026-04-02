@@ -65,7 +65,7 @@
 			const data: uPlot.AlignedData = [result.timestamps, ...result.series];
 
 			const containerWidth = containerEl?.clientWidth ?? 800;
-			plotHeight = containerWidth < 640 ? 140 : 200;
+			plotHeight = containerWidth < 640 ? 180 : 300;
 
 			// Destroy previous chart if any
 			if (uplot) {

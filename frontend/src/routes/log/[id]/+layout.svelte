@@ -122,7 +122,7 @@
 			{/if}
 
 			<!-- Content area with tabs -->
-			<div class="flex-1 flex flex-col overflow-hidden">
+			<div class="flex-1 flex flex-col min-h-0 overflow-hidden">
 				<!-- Tab bar -->
 				<div class="border-b border-gray-200 px-3 sm:px-4 overflow-hidden">
 					<div class="flex flex-wrap gap-x-3 sm:gap-x-4">
@@ -151,7 +151,7 @@
 				</div>
 
 				<!-- Panel content (from child route) -->
-				<div class="flex-1 flex flex-col overflow-y-auto p-3 sm:p-4 space-y-4 overflow-x-hidden">
+				<div class="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-4 overflow-x-hidden">
 					{@render children()}
 				</div>
 			</div>
