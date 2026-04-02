@@ -151,7 +151,7 @@
 				</div>
 
 				<!-- Panel content (from child route) -->
-				<div class="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4 space-y-4 overflow-x-hidden">
+				<div class="flex-1 flex flex-col min-h-0 overflow-y-auto p-3 sm:p-4 space-y-4 overflow-x-hidden">
 					{@render children()}
 				</div>
 			</div>
