@@ -40,33 +40,37 @@
 		return multiId > 0 ? `${name}_${multiId}` : name;
 	}
 
-	async function toggleTopic(name: string) {
+	function toggleTopic(name: string) {
 		const next = new Set(expandedTopics);
 		if (next.has(name)) {
 			next.delete(name);
 		} else {
 			next.add(name);
-			// Fetch fields if not cached
+			// Kick off async field fetch (don't block UI)
 			const info = metadata.topics[name];
 			const key = topicKey(name, info.multi_id);
 			if (!topicFields.has(key) && !loadingTopics.has(key)) {
-				loadingTopics = new Set([...loadingTopics, key]);
-				try {
-					const session = await getSession();
-					const schema = await session.getTopicSchema(name, info.multi_id);
-					topicFields = new Map([...topicFields, [key, schema]]);
-				} catch (e) {
-					const msg = e instanceof Error ? e.message : 'Failed to load fields';
-					fieldErrors = new Map([...fieldErrors, [key, msg]]);
-					console.error(`Failed to fetch schema for ${name}:`, e);
-				} finally {
-					const updated = new Set(loadingTopics);
-					updated.delete(key);
-					loadingTopics = updated;
-				}
+				fetchFields(name, key, info.multi_id);
 			}
 		}
 		expandedTopics = next;
+	}
+
+	async function fetchFields(topic: string, key: string, multiId: number) {
+		loadingTopics = new Set([...loadingTopics, key]);
+		try {
+			const session = await getSession();
+			const schema = await session.getTopicSchema(topic, multiId);
+			topicFields = new Map([...topicFields, [key, schema]]);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : 'Failed to load fields';
+			fieldErrors = new Map([...fieldErrors, [key, msg]]);
+			console.error(`Failed to fetch schema for ${topic}:`, e);
+		} finally {
+			const updated = new Set(loadingTopics);
+			updated.delete(key);
+			loadingTopics = updated;
+		}
 	}
 
 	function isFieldPlotted(topic: string, field: string): boolean {
