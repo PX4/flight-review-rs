@@ -101,10 +101,12 @@
 			const mb = mapboxgl.default || mapboxgl;
 			mb.accessToken = PUBLIC_MAPBOX_TOKEN;
 
+			const initialBounds = getBounds();
 			map = new mb.Map({
 				container: mapContainer,
 				style: 'mapbox://styles/mapbox/outdoors-v12',
 				attributionControl: true,
+				...(initialBounds ? { bounds: initialBounds, fitBoundsOptions: { padding: 60, maxZoom: 17 } } : {}),
 			});
 
 			map.on('load', () => {
