@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip } from 'chart.js';
 	import type { StatsDataPoint } from '$lib/types';
+	import { getHardwareName } from '$lib/utils/hardwareNames';
 
 	Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip);
 
@@ -21,7 +22,7 @@
 		if (!canvasEl || loading || data.length === 0) return;
 
 		const sorted = [...data].sort((a, b) => b.count - a.count).slice(0, 15);
-		const labels = sorted.map((d) => d.group);
+		const labels = sorted.map((d) => getHardwareName(d.group));
 		const counts = sorted.map((d) => d.count);
 
 		if (chart) chart.destroy();
