@@ -95,7 +95,7 @@
 		<ErrorBanner message={error} onRetry={loadData} />
 	</div>
 {:else if metadata && logRecord}
-	<div class="flex h-dvh flex-col overflow-hidden">
+	<div class="flex flex-col {activeTab === '/map' ? 'h-dvh overflow-hidden' : 'min-h-dvh'}">
 		<!-- Compact top bar -->
 		<div class="flex items-center gap-4 border-b border-gray-200 bg-white px-4 py-2 shrink-0 dark:border-gray-700 dark:bg-gray-900">
 			<a href="/browse" class="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
@@ -117,16 +117,16 @@
 		{/if}
 
 		<!-- Main area: sidebar + content -->
-		<div class="flex flex-1 min-h-0 overflow-hidden">
+		<div class="flex flex-1 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
 			<!-- Topic Tree Sidebar (desktop, plots tab only) -->
 			{#if activeTab === ''}
-				<div class="hidden md:flex md:w-52 lg:w-64 md:flex-col md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900">
+				<div class="hidden md:flex md:w-52 lg:w-64 md:flex-col md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900 sticky top-0 self-start max-h-dvh overflow-y-auto">
 					<TopicTreeSidebar {metadata} />
 				</div>
 			{/if}
 
 			<!-- Content area with tabs -->
-			<div class="flex-1 flex flex-col min-h-0 overflow-hidden">
+			<div class="flex-1 flex flex-col {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
 				<!-- Tab bar -->
 				<div class="border-b border-gray-200 px-3 sm:px-4 overflow-hidden">
 					<div class="flex flex-wrap gap-x-3 sm:gap-x-4">
@@ -155,7 +155,7 @@
 				</div>
 
 				<!-- Panel content (from child route) -->
-				<div class="flex-1 flex flex-col min-h-0 overflow-y-auto p-3 sm:p-4 space-y-4 overflow-x-hidden">
+				<div class="{activeTab === '/map' ? 'flex-1 flex flex-col min-h-0' : ''} p-3 sm:p-4 space-y-4 overflow-x-hidden">
 					{@render children()}
 				</div>
 			</div>
