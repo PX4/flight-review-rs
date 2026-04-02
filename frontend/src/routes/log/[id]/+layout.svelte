@@ -56,12 +56,16 @@
 
 	// Tab routing
 	const logBase = $derived(`/log/${page.params.id}`);
-	const tabs = [
+	const hasGps = $derived(
+		metadata?.analysis?.gps_track != null && metadata.analysis.gps_track.length > 1
+	);
+
+	const tabs = $derived([
 		{ label: 'Plots', href: '' },
-		{ label: 'Map', href: '/map' },
+		...(hasGps ? [{ label: 'Map', href: '/map' }] : []),
 		{ label: 'Messages', href: '/messages' },
 		{ label: 'Parameters', href: '/parameters' },
-	];
+	]);
 
 	let activeTab = $derived.by(() => {
 		const path = page.url.pathname;
