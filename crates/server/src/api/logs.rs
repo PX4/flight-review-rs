@@ -310,6 +310,29 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
         record.error_count = search.error_count.or(record.error_count);
         record.warning_count = search.warning_count.or(record.warning_count);
 
+        // Reverse-geocode if location_name is still empty after conversion
+        let has_location = record
+            .location_name
+            .as_ref()
+            .map_or(false, |s| !s.trim().is_empty());
+        if !has_location {
+            if let (Some(lat_val), Some(lon_val), Some(token)) =
+                (record.lat, record.lon, state.mapbox_token.as_deref())
+            {
+                if let Some(name) = crate::geocode::reverse_geocode(
+                    &state.http_client,
+                    token,
+                    lat_val,
+                    lon_val,
+                )
+                .await
+                {
+                    tracing::info!(log_id = %id, location = %name, "geocoded location (lazy)");
+                    record.location_name = Some(name);
+                }
+            }
+        }
+
         state.db.update(id, &record).await?;
     }
 
