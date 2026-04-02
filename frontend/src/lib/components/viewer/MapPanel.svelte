@@ -106,7 +106,7 @@
 				container: mapContainer,
 				style: 'mapbox://styles/mapbox/outdoors-v12',
 				attributionControl: true,
-				...(initialBounds ? { bounds: initialBounds, fitBoundsOptions: { padding: 60, maxZoom: 17 } } : {}),
+				...(initialBounds ? { bounds: initialBounds, fitBoundsOptions: { padding: 100, maxZoom: 16 } } : {}),
 			});
 
 			map.on('load', () => {
@@ -156,7 +156,7 @@
 				// Fit bounds
 				const bounds = getBounds();
 				if (bounds) {
-					map.fitBounds(bounds, { padding: 60, maxZoom: 17 });
+					map.fitBounds(bounds, { padding: 100, maxZoom: 16 });
 				}
 
 				// Click on track → update cursor timestamp
