@@ -27,6 +27,9 @@
 	// Guard against infinite loops when syncing scales
 	let settingScale = false;
 
+	// Track the fields key to detect changes
+	let lastFieldsKey = '';
+
 	async function getSession(): Promise<LogSession> {
 		if (sessionCache.has(logId)) return sessionCache.get(logId)!;
 		const db = await initDuckDB();
@@ -39,10 +42,17 @@
 		activePlots.update((plots) => plots.filter((p) => p.id !== config.id));
 	}
 
-	onMount(async () => {
+	async function loadAndRender(fields: string[], colors: string[]) {
+		const fieldsKey = fields.join(',');
+		if (fieldsKey === lastFieldsKey && uplot) return;
+		lastFieldsKey = fieldsKey;
+
+		loading = true;
+		error = null;
+
 		try {
 			const session = await getSession();
-			const result = await session.queryTopic(config.topic, config.fields, {
+			const result = await session.queryTopic(config.topic, fields, {
 				multiId: config.multiId
 			});
 
@@ -56,6 +66,17 @@
 
 			const containerWidth = containerEl?.clientWidth ?? 800;
 			plotHeight = containerWidth < 640 ? 140 : 200;
+
+			// Destroy previous chart if any
+			if (uplot) {
+				uplot.destroy();
+				uplot = null;
+			}
+
+			// Clear the chart container
+			if (chartEl) {
+				chartEl.innerHTML = '';
+			}
 
 			const opts: uPlot.Options = {
 				width: containerWidth,
@@ -99,9 +120,9 @@
 				},
 				series: [
 					{}, // x-axis series
-					...config.fields.map((field: string, i: number) => ({
+					...fields.map((field: string, i: number) => ({
 						label: field,
-						stroke: config.colors[i] ?? '#818cf8',
+						stroke: colors[i] ?? '#818cf8',
 						width: 1.5,
 					})),
 				],
@@ -111,27 +132,43 @@
 				uplot = new uPlot(opts, data, chartEl);
 			}
 
-			// Observe container resize
-			if (containerEl) {
-				resizeObserver = new ResizeObserver((entries) => {
-					for (const entry of entries) {
-						const w = entry.contentRect.width;
-						if (w > 0) {
-							plotHeight = w < 640 ? 140 : 200;
-							if (uplot) {
-								uplot.setSize({ width: w, height: plotHeight });
-							}
-						}
-					}
-				});
-				resizeObserver.observe(containerEl);
-			}
-
 			loading = false;
 		} catch (e) {
-			console.error('PlotStrip mount error:', e);
+			console.error('PlotStrip load error:', e);
 			error = e instanceof Error ? e.message : 'Failed to load data';
 			loading = false;
+		}
+	}
+
+	onMount(() => {
+		// Setup resize observer
+		if (containerEl) {
+			resizeObserver = new ResizeObserver((entries) => {
+				for (const entry of entries) {
+					const w = entry.contentRect.width;
+					if (w > 0) {
+						plotHeight = w < 640 ? 140 : 200;
+						if (uplot) {
+							uplot.setSize({ width: w, height: plotHeight });
+						}
+					}
+				}
+			});
+			resizeObserver.observe(containerEl);
+		}
+
+		// Initial load
+		loadAndRender(config.fields, config.colors);
+	});
+
+	// React to config.fields changes (when user adds/removes a field in an existing topic)
+	$effect(() => {
+		const fields = config.fields;
+		const colors = config.colors;
+		// Only re-render if fields actually changed
+		const key = fields.join(',');
+		if (key !== lastFieldsKey) {
+			loadAndRender(fields, colors);
 		}
 	});
 

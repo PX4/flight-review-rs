@@ -7,7 +7,13 @@ export async function initDuckDB(): Promise<AsyncDuckDB> {
   const duckdb = await import('@duckdb/duckdb-wasm');
   const BUNDLES = duckdb.getJsDelivrBundles();
   const bundle = await duckdb.selectBundle(BUNDLES);
-  const worker = new Worker(bundle.mainWorker!);
+
+  // Fetch the worker script as a blob to avoid cross-origin Worker restrictions.
+  // Creating a Worker directly from a CDN URL fails when the page is on a different origin.
+  const workerScript = await fetch(bundle.mainWorker!).then((r) => r.blob());
+  const workerUrl = URL.createObjectURL(workerScript);
+  const worker = new Worker(workerUrl);
+
   const logger = new duckdb.ConsoleLogger();
   const db = new duckdb.AsyncDuckDB(logger, worker);
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
@@ -82,7 +88,7 @@ export class LogSession {
   ): Promise<{ timestamps: Float64Array; series: Float64Array[] } | null> {
     const conn = await this.getConnection();
     const url = `${window.location.origin}${this.parquetUrl(topic, options?.multiId ?? 0)}`;
-    const cols = ['timestamp', ...columns].join(', ');
+    const cols = ['timestamp', ...columns.map((c) => `"${c}"`)].join(', ');
 
     let sql: string;
     if (options?.timeRange) {

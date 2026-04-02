@@ -1,13 +1,34 @@
 <script lang="ts">
+	import { getContext } from 'svelte';
 	import type { FlightMetadata, PlotConfig, TopicInfo } from '$lib/types';
 	import { activePlots, plottedFields } from '$lib/stores/logViewer';
+	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 
 	let { metadata } = $props<{ metadata: FlightMetadata }>();
+
+	const ctx = getContext<{ logId: string }>('log-viewer');
 
 	let searchQuery = $state('');
 	let expandedTopics = $state<Set<string>>(new Set());
 
+	// Cache of fetched field schemas per topic key ("topic_multiId")
+	let topicFields = $state<Map<string, { name: string; type: string }[]>>(new Map());
+	let loadingTopics = $state<Set<string>>(new Set());
+	let fieldErrors = $state<Map<string, string>>(new Map());
+
 	const PLOT_COLORS = ['#818cf8', '#fbbf24', '#34d399', '#f87171', '#a78bfa', '#fb923c', '#38bdf8', '#e879f9'];
+
+	// Module-level session cache (shared with PlotStrip)
+	const sessionCache = (globalThis as any).__plotSessionCache ??= new Map<string, LogSession>();
+
+	async function getSession(): Promise<LogSession> {
+		const logId = ctx.logId;
+		if (sessionCache.has(logId)) return sessionCache.get(logId)!;
+		const db = await initDuckDB();
+		const session = new LogSession(db, logId);
+		sessionCache.set(logId, session);
+		return session;
+	}
 
 	const sortedTopics: [string, TopicInfo][] = $derived(
 		(Object.entries(metadata.topics) as [string, TopicInfo][])
@@ -15,27 +36,41 @@
 			.sort(([a], [b]) => a.localeCompare(b))
 	);
 
-	function toggleTopic(name: string) {
+	function topicKey(name: string, multiId: number): string {
+		return multiId > 0 ? `${name}_${multiId}` : name;
+	}
+
+	async function toggleTopic(name: string) {
 		const next = new Set(expandedTopics);
 		if (next.has(name)) {
 			next.delete(name);
 		} else {
 			next.add(name);
+			// Fetch fields if not cached
+			const info = metadata.topics[name];
+			const key = topicKey(name, info.multi_id);
+			if (!topicFields.has(key) && !loadingTopics.has(key)) {
+				loadingTopics = new Set([...loadingTopics, key]);
+				try {
+					const session = await getSession();
+					const schema = await session.getTopicSchema(name, info.multi_id);
+					topicFields = new Map([...topicFields, [key, schema]]);
+				} catch (e) {
+					const msg = e instanceof Error ? e.message : 'Failed to load fields';
+					fieldErrors = new Map([...fieldErrors, [key, msg]]);
+					console.error(`Failed to fetch schema for ${name}:`, e);
+				} finally {
+					const updated = new Set(loadingTopics);
+					updated.delete(key);
+					loadingTopics = updated;
+				}
+			}
 		}
 		expandedTopics = next;
 	}
 
-	function getTopicFields(topicName: string): string[] {
-		// We don't have field-level info in metadata.topics, so for MVP
-		// we show a placeholder list based on known common fields.
-		// In the real implementation, field names come from Parquet schema.
-		return [];
-	}
-
 	function isFieldPlotted(topic: string, field: string): boolean {
-		let plotted: Map<string, Set<string>> = new Map();
-		plottedFields.subscribe((v) => (plotted = v))();
-		return plotted.get(topic)?.has(field) ?? false;
+		return $plottedFields.get(topic)?.has(field) ?? false;
 	}
 
 	function toggleField(topic: string, field: string, multiId: number) {
@@ -91,6 +126,10 @@
 	<div class="space-y-1">
 		{#each sortedTopics as [topicName, topicInfo]}
 			{@const isExpanded = expandedTopics.has(topicName)}
+			{@const key = topicKey(topicName, topicInfo.multi_id)}
+			{@const fields = topicFields.get(key)}
+			{@const isLoading = loadingTopics.has(key)}
+			{@const fieldError = fieldErrors.get(key)}
 			<div>
 				<button
 					class="flex items-center gap-2 w-full rounded-md px-2 py-1.5 text-sm hover:bg-gray-50 {isExpanded ? 'text-gray-900' : 'text-gray-700 hover:text-gray-900'}"
@@ -106,13 +145,44 @@
 						</svg>
 					{/if}
 					<span class="font-medium">{topicName}</span>
+					{#if topicInfo.multi_id > 0}
+						<span class="text-xs text-gray-400">#{topicInfo.multi_id}</span>
+					{/if}
 					<span class="ml-auto text-xs text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">{topicInfo.message_count}</span>
 				</button>
 				{#if isExpanded}
 					<div class="ml-6 space-y-0.5 mt-1">
-						<p class="px-2 py-1 text-xs text-gray-400 italic">
-							Field details available after Parquet integration
-						</p>
+						{#if isLoading}
+							<p class="px-2 py-1 text-xs text-gray-400 flex items-center gap-1.5">
+								<svg class="size-3 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+								</svg>
+								Loading fields...
+							</p>
+						{:else if fieldError}
+							<p class="px-2 py-1 text-xs text-red-400">{fieldError}</p>
+						{:else if fields && fields.length > 0}
+							{#each fields as fieldInfo}
+								{@const plotted = isFieldPlotted(topicName, fieldInfo.name)}
+								<button
+									class="flex items-center gap-2 w-full rounded px-2 py-1 text-xs hover:bg-gray-50 {plotted ? 'text-indigo-600 font-medium bg-indigo-50' : 'text-gray-600'}"
+									onclick={() => toggleField(topicName, fieldInfo.name, topicInfo.multi_id)}
+								>
+									<span class="size-3 shrink-0 rounded border {plotted ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'}">
+										{#if plotted}
+											<svg class="size-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2">
+												<path d="M2.5 6l2.5 2.5 4.5-4.5" />
+											</svg>
+										{/if}
+									</span>
+									<span class="truncate">{fieldInfo.name}</span>
+									<span class="ml-auto text-[10px] text-gray-400 shrink-0">{fieldInfo.type}</span>
+								</button>
+							{/each}
+						{:else if fields}
+							<p class="px-2 py-1 text-xs text-gray-400 italic">No numeric fields</p>
+						{/if}
 					</div>
 				{/if}
 			</div>
