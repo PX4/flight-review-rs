@@ -13,21 +13,57 @@
 	 * Each entry: [topic, multiId, fields[], yLabel].
 	 * Only topics present in the log will be shown.
 	 */
+	// Default plot definitions matching PX4 Flight Review v1.
+	// [id, topic, multiId, fields[], yLabel]
+	// Only topics present in the log will be shown.
 	const DEFAULT_PLOTS: [string, string, number, string[], string][] = [
-		// [id, topic, multiId, fields, yLabel]
-		// Altitude (NED: z is down, so negate for display — handled by user mentally)
+		// --- Position & Altitude ---
 		['altitude', 'vehicle_local_position', 0, ['z'], 'Altitude (m, NED down)'],
-		// Velocity
+		['local_pos_xy', 'vehicle_local_position', 0, ['x', 'y'], 'Local Position XY (m)'],
 		['velocity', 'vehicle_local_position', 0, ['vx', 'vy', 'vz'], 'Velocity (m/s)'],
-		// Angular velocity (roll/pitch/yaw rates)
+
+		// --- Angular Rates ---
 		['angular_vel', 'vehicle_angular_velocity', 0, ['xyz[0]', 'xyz[1]', 'xyz[2]'], 'Angular Velocity (rad/s)'],
-		// Accelerometer
+		['rate_setpoint', 'vehicle_rates_setpoint', 0, ['roll', 'pitch', 'yaw'], 'Rate Setpoint (rad/s)'],
+		['rate_ctrl', 'rate_ctrl_status', 0, ['rollspeed_integ', 'pitchspeed_integ', 'yawspeed_integ'], 'Rate Controller Integral'],
+
+		// --- Sensors ---
 		['accel', 'sensor_combined', 0, ['accelerometer_m_s2[0]', 'accelerometer_m_s2[1]', 'accelerometer_m_s2[2]'], 'Acceleration (m/s²)'],
-		// Actuator outputs
-		['actuators', 'actuator_outputs', 0, ['output[0]', 'output[1]', 'output[2]', 'output[3]'], 'Actuator Outputs'],
-		// Battery
+		['gyro', 'sensor_combined', 0, ['gyro_rad[0]', 'gyro_rad[1]', 'gyro_rad[2]'], 'Gyroscope (rad/s)'],
+		['mag', 'vehicle_magnetometer', 0, ['magnetometer_ga[0]', 'magnetometer_ga[1]', 'magnetometer_ga[2]'], 'Magnetometer (gauss)'],
+		['baro', 'sensor_baro', 0, ['pressure', 'temperature'], 'Barometer'],
+
+		// --- Actuators ---
+		['actuator_motors', 'actuator_motors', 0, ['control[0]', 'control[1]', 'control[2]', 'control[3]'], 'Motor Outputs'],
+		['actuator_servos', 'actuator_servos', 0, ['control[0]', 'control[1]', 'control[2]', 'control[3]'], 'Servo Outputs'],
+		['actuator_outputs', 'actuator_outputs', 0, ['output[0]', 'output[1]', 'output[2]', 'output[3]'], 'Raw PWM Outputs'],
+
+		// --- Manual Control ---
+		['manual_ctrl', 'manual_control_setpoint', 0, ['roll', 'pitch', 'yaw', 'throttle'], 'Manual Control (sticks)'],
+
+		// --- RC Input ---
+		['rc_quality', 'input_rc', 0, ['rssi', 'link_quality'], 'RC Link Quality'],
+
+		// --- Airspeed (fixed-wing / VTOL) ---
+		['airspeed', 'airspeed_validated', 0, ['true_airspeed_m_s', 'indicated_airspeed_m_s'], 'Airspeed (m/s)'],
+
+		// --- GPS ---
+		['gps_accuracy', 'vehicle_gps_position', 0, ['eph', 'epv'], 'GPS Accuracy (m)'],
+		['gps_sats', 'vehicle_gps_position', 0, ['satellites_used'], 'GPS Satellites'],
+
+		// --- Estimator ---
+		['est_accuracy', 'estimator_status', 0, ['pos_horiz_accuracy', 'pos_vert_accuracy'], 'Estimator Accuracy (m)'],
+		['est_test_ratio', 'estimator_status', 0, ['pos_test_ratio', 'vel_test_ratio', 'hgt_test_ratio'], 'Estimator Test Ratios'],
+
+		// --- Battery & Power ---
 		['battery', 'battery_status', 0, ['voltage_v', 'current_a'], 'Battery'],
-		// CPU load
+		['battery_energy', 'battery_status', 0, ['discharged_mah', 'remaining'], 'Battery State'],
+		['sys_power', 'system_power', 0, ['voltage5v_v', 'sensors3v3[0]'], 'System Power (V)'],
+
+		// --- VTOL ---
+		['vtol', 'vtol_vehicle_status', 0, ['vehicle_vtol_state'], 'VTOL State'],
+
+		// --- System ---
 		['cpu', 'cpuload', 0, ['load', 'ram_usage'], 'CPU Load'],
 	];
 
