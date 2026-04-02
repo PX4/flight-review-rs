@@ -22,7 +22,7 @@
 
 	let loading = $state(true);
 	let error = $state<string | null>(null);
-	let plotHeight = $state(200);
+	let plotHeight = $state(300);
 
 	// Guard against infinite loops when syncing scales
 	let settingScale = false;
@@ -147,7 +147,7 @@
 				for (const entry of entries) {
 					const w = entry.contentRect.width;
 					if (w > 0) {
-						plotHeight = w < 640 ? 140 : 200;
+						plotHeight = w < 640 ? 180 : 300;
 						if (uplot) {
 							uplot.setSize({ width: w, height: plotHeight });
 						}
