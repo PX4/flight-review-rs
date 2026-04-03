@@ -16,6 +16,17 @@
 	let hwValue = $state('');
 	let fwValue = $state('');
 	let locationValue = $state('');
+	let includePreReleases = $state(false);
+
+	// Filter firmware versions: stable only by default, all if checkbox is checked
+	const firmwareOptions = $derived.by(() => {
+		const all = facets?.ver_sw_release_str ?? [];
+		// Normalize: ensure v prefix for display
+		const normalized = all.map(v => v.startsWith('v') ? v : `v${v}`);
+		if (includePreReleases) return normalized;
+		// Stable = no suffix after version numbers (no -dev, -alpha, -beta, -rc)
+		return normalized.filter(v => /^v\d+\.\d+\.\d+$/.test(v));
+	});
 	let durationMin = $state('');
 	let durationMax = $state('');
 
@@ -179,13 +190,23 @@
 				/>
 
 				<!-- Firmware -->
-				<Combobox
-					label="Firmware"
-					options={facets?.ver_sw_release_str ?? []}
-					value={fwValue}
-					placeholder="e.g. 1.14.0"
-					onChange={(v) => { fwValue = v; debouncedChange('ver_sw_release_str', v); }}
-				/>
+				<div>
+					<Combobox
+						label="Firmware"
+						options={firmwareOptions}
+						value={fwValue}
+						placeholder="e.g. v1.14.0"
+						onChange={(v) => { fwValue = v; debouncedChange('ver_sw_release_str', v); }}
+					/>
+					<label class="flex items-center gap-1.5 mt-1.5 text-xs text-gray-500 cursor-pointer select-none">
+						<input
+							type="checkbox"
+							bind:checked={includePreReleases}
+							class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 size-3.5"
+						/>
+						Include pre-releases
+					</label>
+				</div>
 
 				<!-- Location -->
 				<div>
