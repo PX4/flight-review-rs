@@ -2,6 +2,7 @@
 	import { getFilterFacets, type FilterFacets } from '$lib/api';
 	import type { ListFilters } from '$lib/types';
 	import Combobox from '$lib/components/shared/Combobox.svelte';
+	import px4Versions from '$lib/data/px4-versions.json';
 
 	let { filters, onChange }: {
 		filters: ListFilters;
@@ -18,17 +19,19 @@
 	let locationValue = $state('');
 	let includePreReleases = $state(false);
 
-	// Filter firmware versions: stable only by default, all if checkbox is checked
+	// Canonical PX4 stable releases (newest first)
+	const stableVersions = [...px4Versions].reverse();
+
+	// Filter firmware versions: canonical stable releases by default, facets data for pre-releases
 	const firmwareOptions = $derived.by(() => {
+		if (!includePreReleases) return stableVersions;
+		// Include all versions from facets, normalized
 		const all = facets?.ver_sw_release_str ?? [];
-		// Normalize: ensure v prefix, strip -release suffix (legacy format)
 		const normalized = [...new Set(all.map(v => {
 			let s = v.startsWith('v') ? v : `v${v}`;
 			return s.replace(/-release$/, '');
 		}))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-		if (includePreReleases) return normalized;
-		// Stable = just vX.Y.Z with no suffix
-		return normalized.filter(v => /^v\d+\.\d+\.\d+$/.test(v));
+		return normalized;
 	});
 	let durationMin = $state('');
 	let durationMax = $state('');
