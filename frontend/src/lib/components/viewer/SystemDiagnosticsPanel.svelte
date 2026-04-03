@@ -1,4 +1,7 @@
 <script lang="ts">
+	import ProcessTable from './ProcessTable.svelte';
+	import PerfCounterTable from './PerfCounterTable.svelte';
+
 	let { multiInfo }: { multiInfo: Record<string, string[]> } = $props();
 
 	function getText(key: string): string | null {
@@ -40,7 +43,7 @@
 					<div>
 						<h4 class="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Pre-flight</h4>
 						{#if perfTopPre}
-							<pre class="max-h-96 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs text-gray-800 ring-1 ring-inset ring-gray-200">{perfTopPre}</pre>
+							<ProcessTable text={perfTopPre} />
 						{:else}
 							<p class="text-sm text-gray-400 italic">(Not recorded)</p>
 						{/if}
@@ -48,7 +51,7 @@
 					<div>
 						<h4 class="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Post-flight</h4>
 						{#if perfTopPost}
-							<pre class="max-h-96 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs text-gray-800 ring-1 ring-inset ring-gray-200">{perfTopPost}</pre>
+							<ProcessTable text={perfTopPost} />
 						{:else}
 							<p class="text-sm text-gray-400 italic">(Not recorded)</p>
 						{/if}
@@ -71,7 +74,7 @@
 					<div>
 						<h4 class="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Pre-flight</h4>
 						{#if perfCounterPre}
-							<pre class="max-h-96 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs text-gray-800 ring-1 ring-inset ring-gray-200">{perfCounterPre}</pre>
+							<PerfCounterTable text={perfCounterPre} />
 						{:else}
 							<p class="text-sm text-gray-400 italic">(Not recorded)</p>
 						{/if}
@@ -79,7 +82,7 @@
 					<div>
 						<h4 class="mb-2 text-xs font-medium text-gray-500 uppercase tracking-wide">Post-flight</h4>
 						{#if perfCounterPost}
-							<pre class="max-h-96 overflow-auto rounded-md bg-gray-50 p-3 font-mono text-xs text-gray-800 ring-1 ring-inset ring-gray-200">{perfCounterPost}</pre>
+							<PerfCounterTable text={perfCounterPost} />
 						{:else}
 							<p class="text-sm text-gray-400 italic">(Not recorded)</p>
 						{/if}
