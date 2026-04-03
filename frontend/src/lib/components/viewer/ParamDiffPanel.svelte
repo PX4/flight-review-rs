@@ -17,7 +17,7 @@
 	type SortKey = 'name' | 'value' | 'default' | 'delta';
 	type SortDir = 'asc' | 'desc';
 
-	let viewMode = $state<ViewMode>('non-default');
+	let viewMode = $state<ViewMode>(diffs.length > 0 ? 'non-default' : 'all');
 	let sortKey = $state<SortKey>('name');
 	let sortDir = $state<SortDir>('asc');
 	let searchText = $state('');
@@ -37,6 +37,7 @@
 	});
 
 	function getDeltaPct(diff: ParamDiff): number {
+		if (diff.value == null || diff.default == null) return 0;
 		if (diff.default === 0) return diff.value === 0 ? 0 : 100;
 		return Math.abs((diff.value - diff.default) / diff.default) * 100;
 	}
@@ -117,7 +118,8 @@
 		}
 	}
 
-	function formatNumber(n: number): string {
+	function formatNumber(n: number | null | undefined): string {
+		if (n == null) return '—';
 		if (Number.isInteger(n)) return n.toString();
 		return n.toPrecision(6);
 	}
