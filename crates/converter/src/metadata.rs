@@ -377,15 +377,18 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
         let minor = (release >> 16) & 0xFF;
         let patch = (release >> 8) & 0xFF;
         let release_type = release & 0xFF;
-        let type_str = match release_type {
-            0 => "dev",
-            64 => "alpha",
-            128 => "beta",
-            192 => "rc",
-            255 => "release",
-            _ => "unknown",
+        let type_suffix = match release_type {
+            0 => Some("dev"),
+            64 => Some("alpha"),
+            128 => Some("beta"),
+            192 => Some("rc"),
+            255 => None, // stable release, no suffix
+            _ => Some("unknown"),
         };
-        meta.ver_sw_release_str = Some(format!("{}.{}.{}-{}", major, minor, patch, type_str));
+        meta.ver_sw_release_str = Some(match type_suffix {
+            Some(s) => format!("v{}.{}.{}-{}", major, minor, patch, s),
+            None => format!("v{}.{}.{}", major, minor, patch),
+        });
     }
 
     Ok(meta)
@@ -478,7 +481,7 @@ mod tests {
 
         // Derived fields
         assert!(meta.flight_duration_s.unwrap() > 100.0, "Should have substantial flight duration");
-        assert_eq!(meta.ver_sw_release_str.as_deref(), Some("1.14.4-release"));
+        assert_eq!(meta.ver_sw_release_str.as_deref(), Some("v1.14.4"));
 
         // GPS first fix
         let gps = meta.gps_first_fix.as_ref().expect("Should have GPS fix");
