@@ -148,7 +148,7 @@
 
 	{#if open}
 		<div
-			class="mt-3 overflow-hidden transition-all duration-200"
+			class="mt-3 overflow-visible transition-all duration-200"
 		>
 			<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
 				<!-- Vehicle Type -->
