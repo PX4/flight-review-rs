@@ -122,6 +122,28 @@ pub async fn upload(
         .put_file(log_id, "metadata.json", Bytes::from(metadata_json))
         .await?;
 
+    // 5b. Reverse-geocode if location_name was not provided by the user
+    let lat = result.metadata.gps_first_fix.as_ref().map(|g| g.lat_deg);
+    let lon = result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg);
+    let user_gave_location = location_name
+        .as_ref()
+        .is_some_and(|s| !s.trim().is_empty());
+    if !user_gave_location {
+        if let (Some(lat_val), Some(lon_val), Some(token)) = (lat, lon, state.mapbox_token.as_deref())
+        {
+            match crate::geocode::reverse_geocode(&state.http_client, token, lat_val, lon_val).await
+            {
+                Some(name) => {
+                    tracing::info!(log_id = %log_id, location = %name, "geocoded location");
+                    location_name = Some(name);
+                }
+                None => {
+                    tracing::debug!(log_id = %log_id, "geocoding returned no result");
+                }
+            }
+        }
+    }
+
     // 6. Create a LogRecord from the metadata and insert into DB
     let delete_token = Uuid::new_v4().simple().to_string();
     let search = extract_search_fields(&result.metadata);
@@ -135,8 +157,8 @@ pub async fn upload(
         ver_sw_release_str: result.metadata.ver_sw_release_str.clone(),
         flight_duration_s: result.metadata.flight_duration_s,
         topic_count: result.metadata.topics.len() as i32,
-        lat: result.metadata.gps_first_fix.as_ref().map(|g| g.lat_deg),
-        lon: result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg),
+        lat,
+        lon,
         is_public,
         delete_token: delete_token.clone(),
         description,

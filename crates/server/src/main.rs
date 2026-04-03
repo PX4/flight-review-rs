@@ -48,6 +48,11 @@ struct ServeConfig {
     /// Enables lazy conversion of unconverted logs on first view.
     #[arg(long)]
     v1_ulg_prefix: Option<String>,
+
+    /// Mapbox access token for reverse geocoding uploaded logs.
+    /// Can also be set via the MAPBOX_ACCESS_TOKEN environment variable.
+    #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
+    mapbox_token: Option<String>,
 }
 
 #[derive(Args)]
@@ -94,6 +99,9 @@ async fn run_server(config: ServeConfig) {
     if let Some(ref prefix) = config.v1_ulg_prefix {
         tracing::info!("v1 ULG prefix: {}", prefix);
     }
+    if config.mapbox_token.is_some() {
+        tracing::info!("mapbox geocoding: enabled");
+    }
 
     let db = db::create_db(&config.db)
         .await
@@ -106,6 +114,8 @@ async fn run_server(config: ServeConfig) {
         db,
         storage,
         v1_ulg_prefix: config.v1_ulg_prefix,
+        mapbox_token: config.mapbox_token,
+        http_client: reqwest::Client::new(),
     });
 
     let app = Router::new()
@@ -113,11 +123,13 @@ async fn run_server(config: ServeConfig) {
         .route("/api/upload", post(api::upload::upload)
             .layer(DefaultBodyLimit::max(512 * 1024 * 1024))) // 512 MB
         .route("/api/logs", get(api::logs::list_logs))
+        .route("/api/logs/facets", get(api::logs::list_facets))
         .route("/api/stats", get(api::stats::get_stats))
         .route(
             "/api/logs/{id}",
             get(api::logs::get_log).delete(api::logs::delete_log),
         )
+        .route("/api/logs/{id}/track", get(api::logs::get_track))
         .route(
             "/api/logs/{id}/data/{filename}",
             get(api::logs::get_log_file),

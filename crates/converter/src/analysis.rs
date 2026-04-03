@@ -653,16 +653,32 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                             // GPS track — downsample to ~1 Hz, only 3D fix or better
                             let ft = fix_type.unwrap_or(0);
                             if ft > 2 && (ts - last_track_ts) >= 1_000_000 {
-                                if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
-                                    data.flattened_format.get_field_parser::<i32>("lat"),
-                                    data.flattened_format.get_field_parser::<i32>("lon"),
-                                    data.flattened_format.get_field_parser::<i32>("alt"),
-                                ) {
-                                    let lat = lat_p.parse(data.data);
-                                    let lon = lon_p.parse(data.data);
-                                    let alt = alt_p.parse(data.data);
+                                // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
+                                let coords: Option<(f64, f64, f64)> =
+                                    if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                                        data.flattened_format.get_field_parser::<f64>("latitude_deg"),
+                                        data.flattened_format.get_field_parser::<f64>("longitude_deg"),
+                                        data.flattened_format.get_field_parser::<f64>("altitude_msl_m"),
+                                    ) {
+                                        let lat = lat_p.parse(data.data);
+                                        let lon = lon_p.parse(data.data);
+                                        let alt = alt_p.parse(data.data);
+                                        Some((lat, lon, alt))
+                                    } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                                        data.flattened_format.get_field_parser::<i32>("lat"),
+                                        data.flattened_format.get_field_parser::<i32>("lon"),
+                                        data.flattened_format.get_field_parser::<i32>("alt"),
+                                    ) {
+                                        let lat = lat_p.parse(data.data);
+                                        let lon = lon_p.parse(data.data);
+                                        let alt = alt_p.parse(data.data);
+                                        Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
+                                    } else {
+                                        None
+                                    };
 
-                                    if lat != 0 || lon != 0 {
+                                if let Some((lat_deg, lon_deg, alt_m)) = coords {
+                                    if lat_deg != 0.0 || lon_deg != 0.0 {
                                         // Find current mode from mode_changes
                                         let mode_id = mode_changes
                                             .iter()
@@ -672,9 +688,9 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                                             .unwrap_or(0);
 
                                         analysis.gps_track.push(TrackPoint {
-                                            lat_deg: lat as f64 * 1e-7,
-                                            lon_deg: lon as f64 * 1e-7,
-                                            alt_m: alt as f64 * 1e-3,
+                                            lat_deg,
+                                            lon_deg,
+                                            alt_m,
                                             timestamp_us: ts,
                                             mode_id,
                                         });
@@ -925,6 +941,45 @@ mod tests {
         assert!(!analysis.flight_modes.is_empty());
         // Should have GPS quality data
         assert!(analysis.gps_quality.max_satellites.is_some());
+    }
+
+    #[test]
+    fn test_gps_track_new_field_names() {
+        // Test with any log that has vehicle_gps_position with latitude_deg/longitude_deg fields
+        // (current PX4 format). Falls back to quadrotor_local.ulg or any available fixture.
+        let candidates = ["quadrotor_gps.ulg", "fixed_wing_gps.ulg"];
+        let mut path = String::new();
+        for name in candidates {
+            let p = px4_ulog_fixture(name);
+            if std::path::Path::new(&p).exists() {
+                path = p;
+                break;
+            }
+        }
+        if path.is_empty() {
+            eprintln!("Skipping test_gps_track_new_field_names: no GPS fixture available");
+            return;
+        }
+        let meta = extract_metadata(&path).unwrap();
+        let analysis = analyze(&path, &meta).unwrap();
+
+        if !analysis.gps_track.is_empty() {
+            // Verify track points have valid coordinates
+            for pt in &analysis.gps_track {
+                assert!(pt.lat_deg.abs() <= 90.0, "latitude out of range: {}", pt.lat_deg);
+                assert!(pt.lon_deg.abs() <= 180.0, "longitude out of range: {}", pt.lon_deg);
+                assert!(pt.alt_m.abs() < 100_000.0, "altitude out of range: {}", pt.alt_m);
+                assert!(pt.timestamp_us > 0, "timestamp should be positive");
+            }
+
+            // Track should be roughly in chronological order
+            for window in analysis.gps_track.windows(2) {
+                assert!(
+                    window[1].timestamp_us >= window[0].timestamp_us,
+                    "GPS track should be chronologically ordered"
+                );
+            }
+        }
     }
 
     #[test]

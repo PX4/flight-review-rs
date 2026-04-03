@@ -1,0 +1,32 @@
+@import 'tailwindcss';
+
+@utility scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@theme {
+  --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+
+  /* Flight mode colors */
+  --color-mode-manual: #4CAF50;
+  --color-mode-altitude: #8BC34A;
+  --color-mode-position: #2196F3;
+  --color-mode-mission: #9C27B0;
+  --color-mode-loiter: #FF9800;
+  --color-mode-rtl: #F44336;
+  --color-mode-stabilized: #00BCD4;
+  --color-mode-acro: #E91E63;
+  --color-mode-offboard: #607D8B;
+  --color-mode-takeoff: #CDDC39;
+  --color-mode-land: #795548;
+  --color-mode-orbit: #3F51B5;
+
+  /* Status colors */
+  --color-status-good: #10B981;
+  --color-status-warning: #F59E0B;
+  --color-status-critical: #EF4444;
+}

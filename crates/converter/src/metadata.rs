@@ -203,20 +203,33 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
 
                 // Extract GPS first-fix from vehicle_gps_position
                 if meta.gps_first_fix.is_none() && topic == "vehicle_gps_position" {
-                    if let (Ok(lat_parser), Ok(lon_parser), Ok(alt_parser)) = (
-                        data.flattened_format.get_field_parser::<i32>("lat"),
-                        data.flattened_format.get_field_parser::<i32>("lon"),
-                        data.flattened_format.get_field_parser::<i32>("alt"),
-                    ) {
-                        let lat = lat_parser.parse(data.data);
-                        let lon = lon_parser.parse(data.data);
-                        let alt = alt_parser.parse(data.data);
-                        // Only record if we have a valid fix (non-zero lat/lon)
-                        if lat != 0 && lon != 0 {
+                    // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
+                    let coords: Option<(f64, f64, f64)> =
+                        if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                            data.flattened_format.get_field_parser::<f64>("latitude_deg"),
+                            data.flattened_format.get_field_parser::<f64>("longitude_deg"),
+                            data.flattened_format.get_field_parser::<f64>("altitude_msl_m"),
+                        ) {
+                            Some((lat_p.parse(data.data), lon_p.parse(data.data), alt_p.parse(data.data)))
+                        } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                            data.flattened_format.get_field_parser::<i32>("lat"),
+                            data.flattened_format.get_field_parser::<i32>("lon"),
+                            data.flattened_format.get_field_parser::<i32>("alt"),
+                        ) {
+                            let lat = lat_p.parse(data.data);
+                            let lon = lon_p.parse(data.data);
+                            let alt = alt_p.parse(data.data);
+                            Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
+                        } else {
+                            None
+                        };
+
+                    if let Some((lat_deg, lon_deg, alt_m)) = coords {
+                        if lat_deg != 0.0 && lon_deg != 0.0 {
                             meta.gps_first_fix = Some(GpsPosition {
-                                lat_deg: lat as f64 * 1e-7,
-                                lon_deg: lon as f64 * 1e-7,
-                                alt_m: alt as f64 * 1e-3,
+                                lat_deg,
+                                lon_deg,
+                                alt_m,
                             });
                         }
                     }
@@ -314,22 +327,42 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                 meta.sync_count += 1;
             }
             Message::MultiInfoMessage(msg) => {
+                // ULog multi_info protocol:
+                //   is_continued=false → first/new message for this key (flush any previous)
+                //   is_continued=true  → continuation of the current message
+                if !msg.is_continued {
+                    // Flush any previously buffered value for this key
+                    if let Some(buffer) = multi_info_buffers.remove(msg.key) {
+                        if !buffer.is_empty() {
+                            let value = String::from_utf8_lossy(&buffer).to_string();
+                            meta.multi_info
+                                .entry(msg.key.to_string())
+                                .or_default()
+                                .push(value);
+                        }
+                    }
+                }
                 let buffer = multi_info_buffers
                     .entry(msg.key.to_string())
                     .or_default();
-                buffer.extend_from_slice(msg.value);
-                if !msg.is_continued {
-                    let value = String::from_utf8_lossy(buffer).to_string();
-                    meta.multi_info
-                        .entry(msg.key.to_string())
-                        .or_default()
-                        .push(value);
-                    multi_info_buffers.remove(msg.key);
+                // Each continued fragment is a separate line — add newline
+                // separator so they don't run together when displayed.
+                if !buffer.is_empty() && msg.is_continued {
+                    buffer.push(b'\n');
                 }
+                buffer.extend_from_slice(msg.value);
             }
         }
         SimpleCallbackResult::KeepReading
     })?;
+
+    // Flush any remaining multi_info buffers (last message for each key)
+    for (key, buffer) in multi_info_buffers {
+        if !buffer.is_empty() {
+            let value = String::from_utf8_lossy(&buffer).to_string();
+            meta.multi_info.entry(key).or_default().push(value);
+        }
+    }
 
     // Compute flight duration
     if let (Some(first), Some(last)) = (first_data_timestamp_us, last_data_timestamp_us) {
@@ -344,15 +377,18 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
         let minor = (release >> 16) & 0xFF;
         let patch = (release >> 8) & 0xFF;
         let release_type = release & 0xFF;
-        let type_str = match release_type {
-            0 => "dev",
-            64 => "alpha",
-            128 => "beta",
-            192 => "rc",
-            255 => "release",
-            _ => "unknown",
+        let type_suffix = match release_type {
+            0 => Some("dev"),
+            64 => Some("alpha"),
+            128 => Some("beta"),
+            192 => Some("rc"),
+            255 => None, // stable release, no suffix
+            _ => Some("unknown"),
         };
-        meta.ver_sw_release_str = Some(format!("{}.{}.{}-{}", major, minor, patch, type_str));
+        meta.ver_sw_release_str = Some(match type_suffix {
+            Some(s) => format!("v{}.{}.{}-{}", major, minor, patch, s),
+            None => format!("v{}.{}.{}", major, minor, patch),
+        });
     }
 
     Ok(meta)
@@ -445,7 +481,7 @@ mod tests {
 
         // Derived fields
         assert!(meta.flight_duration_s.unwrap() > 100.0, "Should have substantial flight duration");
-        assert_eq!(meta.ver_sw_release_str.as_deref(), Some("1.14.4-release"));
+        assert_eq!(meta.ver_sw_release_str.as_deref(), Some("v1.14.4"));
 
         // GPS first fix
         let gps = meta.gps_first_fix.as_ref().expect("Should have GPS fix");

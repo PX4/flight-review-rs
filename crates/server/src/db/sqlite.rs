@@ -1,5 +1,5 @@
 #[cfg(feature = "sqlite")]
-use super::{period_to_days, DbError, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams};
+use super::{period_to_days, DbError, FacetsResponse, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams};
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sqlite")]
@@ -277,6 +277,162 @@ fn parse_sort(sort: Option<&str>) -> String {
     }
 }
 
+/// Build a WHERE clause and bind values from ListFilters for SQLite.
+#[cfg(feature = "sqlite")]
+fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
+    let mut conditions = Vec::new();
+    let mut bind_values: Vec<String> = Vec::new();
+
+    if !filters.include_private.unwrap_or(false) {
+        conditions.push("is_public = 1".to_string());
+    }
+    if let Some(ref sys_name) = filters.sys_name {
+        conditions.push("sys_name = ?".to_string());
+        bind_values.push(sys_name.clone());
+    }
+    if let Some(ref ver_hw) = filters.ver_hw {
+        conditions.push("ver_hw LIKE ?".to_string());
+        bind_values.push(format!("%{}%", ver_hw));
+    }
+    if let Some(ref search) = filters.search {
+        conditions.push(
+            "(filename LIKE ? OR sys_name LIKE ? OR ver_hw LIKE ? OR description LIKE ? \
+             OR vehicle_name LIKE ? OR tags LIKE ? OR location_name LIKE ? \
+             OR ver_sw_release_str LIKE ? OR vehicle_type LIKE ?)"
+                .to_string(),
+        );
+        let pattern = format!("%{}%", search);
+        for _ in 0..9 {
+            bind_values.push(pattern.clone());
+        }
+    }
+    if let Some(ref date_from) = filters.date_from {
+        conditions.push("created_at >= ?".to_string());
+        bind_values.push(date_from.clone());
+    }
+    if let Some(ref date_to) = filters.date_to {
+        conditions.push("created_at <= ?".to_string());
+        bind_values.push(date_to.clone());
+    }
+    if let Some(min) = filters.flight_duration_min {
+        conditions.push("flight_duration_s >= ?".to_string());
+        bind_values.push(min.to_string());
+    }
+    if let Some(max) = filters.flight_duration_max {
+        conditions.push("flight_duration_s <= ?".to_string());
+        bind_values.push(max.to_string());
+    }
+    if let Some(ref v) = filters.ver_sw_release_str {
+        conditions.push("ver_sw_release_str LIKE ?".to_string());
+        bind_values.push(format!("{}%", v));
+    }
+    if let Some(ref v) = filters.ver_sw {
+        conditions.push("ver_sw = ?".to_string());
+        bind_values.push(v.clone());
+    }
+    if let Some(ref v) = filters.sys_uuid {
+        conditions.push("sys_uuid = ?".to_string());
+        bind_values.push(v.clone());
+    }
+    if let Some(ref v) = filters.vehicle_type {
+        conditions.push("vehicle_type = ?".to_string());
+        bind_values.push(v.clone());
+    }
+    if let Some(ref v) = filters.localization {
+        conditions.push("localization_sources LIKE ?".to_string());
+        bind_values.push(format!("%{}%", v));
+    }
+    if let Some(ref v) = filters.vibration_status {
+        conditions.push("vibration_status = ?".to_string());
+        bind_values.push(v.clone());
+    }
+    if let Some(has) = filters.has_gps {
+        if has {
+            conditions.push("lat IS NOT NULL".to_string());
+        } else {
+            conditions.push("lat IS NULL".to_string());
+        }
+    }
+    if let Some(ref v) = filters.location_name {
+        conditions.push("location_name LIKE ?".to_string());
+        bind_values.push(format!("%{}%", v));
+    }
+    if let Some(ref topic) = filters.has_topic {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM log_topics WHERE log_id = logs.id AND topic_name = ?)".to_string(),
+        );
+        bind_values.push(topic.clone());
+    }
+    if let Some(ref param_str) = filters.parameter {
+        if let Some((name, value_str)) = param_str.split_once(':') {
+            if let Ok(value) = value_str.parse::<f64>() {
+                conditions.push(
+                    "EXISTS (SELECT 1 FROM log_parameters WHERE log_id = logs.id AND name = ? AND value = ?)".to_string(),
+                );
+                bind_values.push(name.to_string());
+                bind_values.push(value.to_string());
+            }
+        }
+    }
+    if let Some(ref tag) = filters.tag {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM log_tags WHERE log_id = logs.id AND tag = ?)".to_string(),
+        );
+        bind_values.push(tag.clone());
+    }
+    if let Some(ref err_msg) = filters.error_message {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM log_errors WHERE log_id = logs.id AND message LIKE ?)".to_string(),
+        );
+        bind_values.push(format!("%{}%", err_msg));
+    }
+    if let Some(ref fm) = filters.field_max {
+        if let Some((topic_field, val_str)) = fm.split_once(':') {
+            if let Some((topic, field)) = topic_field.split_once('.') {
+                if let Ok(val) = val_str.parse::<f64>() {
+                    conditions.push(
+                        "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND max_val >= ?)".to_string(),
+                    );
+                    bind_values.push(topic.to_string());
+                    bind_values.push(field.to_string());
+                    bind_values.push(val.to_string());
+                }
+            }
+        }
+    }
+    if let Some(ref fm) = filters.field_min {
+        if let Some((topic_field, val_str)) = fm.split_once(':') {
+            if let Some((topic, field)) = topic_field.split_once('.') {
+                if let Ok(val) = val_str.parse::<f64>() {
+                    conditions.push(
+                        "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND min_val <= ?)".to_string(),
+                    );
+                    bind_values.push(topic.to_string());
+                    bind_values.push(field.to_string());
+                    bind_values.push(val.to_string());
+                }
+            }
+        }
+    }
+    if let (Some(lat), Some(lon), Some(radius)) = (filters.lat, filters.lon, filters.radius_km) {
+        let (min_lat, max_lat, min_lon, max_lon) = super::bounding_box(lat, lon, radius);
+        conditions.push("lat BETWEEN ? AND ?".to_string());
+        bind_values.push(min_lat.to_string());
+        bind_values.push(max_lat.to_string());
+        conditions.push("lon BETWEEN ? AND ?".to_string());
+        bind_values.push(min_lon.to_string());
+        bind_values.push(max_lon.to_string());
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    (where_clause, bind_values)
+}
+
 #[cfg(feature = "sqlite")]
 #[async_trait::async_trait]
 impl LogStore for SqliteStore {
@@ -350,158 +506,7 @@ impl LogStore for SqliteStore {
     }
 
     async fn list(&self, filters: &ListFilters) -> Result<ListResponse, DbError> {
-        let mut conditions = Vec::new();
-        let mut bind_values: Vec<String> = Vec::new();
-
-        // By default only return public logs
-        if !filters.include_private.unwrap_or(false) {
-            conditions.push("is_public = 1".to_string());
-        }
-
-        if let Some(ref sys_name) = filters.sys_name {
-            conditions.push("sys_name = ?".to_string());
-            bind_values.push(sys_name.clone());
-        }
-        if let Some(ref ver_hw) = filters.ver_hw {
-            conditions.push("ver_hw = ?".to_string());
-            bind_values.push(ver_hw.clone());
-        }
-        if let Some(ref search) = filters.search {
-            conditions.push(
-                "(filename LIKE ? OR sys_name LIKE ? OR ver_hw LIKE ?)".to_string(),
-            );
-            let pattern = format!("%{}%", search);
-            bind_values.push(pattern.clone());
-            bind_values.push(pattern.clone());
-            bind_values.push(pattern);
-        }
-
-        // Phase 1 search filters
-        if let Some(ref date_from) = filters.date_from {
-            conditions.push("created_at >= ?".to_string());
-            bind_values.push(date_from.clone());
-        }
-        if let Some(ref date_to) = filters.date_to {
-            conditions.push("created_at <= ?".to_string());
-            bind_values.push(date_to.clone());
-        }
-        if let Some(min) = filters.flight_duration_min {
-            conditions.push("flight_duration_s >= ?".to_string());
-            bind_values.push(min.to_string());
-        }
-        if let Some(max) = filters.flight_duration_max {
-            conditions.push("flight_duration_s <= ?".to_string());
-            bind_values.push(max.to_string());
-        }
-        if let Some(ref v) = filters.ver_sw_release_str {
-            conditions.push("ver_sw_release_str LIKE ?".to_string());
-            bind_values.push(format!("{}%", v));
-        }
-        if let Some(ref v) = filters.ver_sw {
-            conditions.push("ver_sw = ?".to_string());
-            bind_values.push(v.clone());
-        }
-        if let Some(ref v) = filters.sys_uuid {
-            conditions.push("sys_uuid = ?".to_string());
-            bind_values.push(v.clone());
-        }
-        if let Some(ref v) = filters.vehicle_type {
-            conditions.push("vehicle_type = ?".to_string());
-            bind_values.push(v.clone());
-        }
-        if let Some(ref v) = filters.localization {
-            conditions.push("localization_sources LIKE ?".to_string());
-            bind_values.push(format!("%{}%", v));
-        }
-        if let Some(ref v) = filters.vibration_status {
-            conditions.push("vibration_status = ?".to_string());
-            bind_values.push(v.clone());
-        }
-        if let Some(has) = filters.has_gps {
-            if has {
-                conditions.push("lat IS NOT NULL".to_string());
-            } else {
-                conditions.push("lat IS NULL".to_string());
-            }
-        }
-
-        // Junction table filters
-        if let Some(ref topic) = filters.has_topic {
-            conditions.push(
-                "EXISTS (SELECT 1 FROM log_topics WHERE log_id = logs.id AND topic_name = ?)".to_string(),
-            );
-            bind_values.push(topic.clone());
-        }
-        if let Some(ref param_str) = filters.parameter {
-            if let Some((name, value_str)) = param_str.split_once(':') {
-                if let Ok(value) = value_str.parse::<f64>() {
-                    conditions.push(
-                        "EXISTS (SELECT 1 FROM log_parameters WHERE log_id = logs.id AND name = ? AND value = ?)".to_string(),
-                    );
-                    bind_values.push(name.to_string());
-                    bind_values.push(value.to_string());
-                }
-            }
-        }
-        if let Some(ref tag) = filters.tag {
-            conditions.push(
-                "EXISTS (SELECT 1 FROM log_tags WHERE log_id = logs.id AND tag = ?)".to_string(),
-            );
-            bind_values.push(tag.clone());
-        }
-        if let Some(ref err_msg) = filters.error_message {
-            conditions.push(
-                "EXISTS (SELECT 1 FROM log_errors WHERE log_id = logs.id AND message LIKE ?)".to_string(),
-            );
-            bind_values.push(format!("%{}%", err_msg));
-        }
-
-        // Field stats filters
-        if let Some(ref fm) = filters.field_max {
-            if let Some((topic_field, val_str)) = fm.split_once(':') {
-                if let Some((topic, field)) = topic_field.split_once('.') {
-                    if let Ok(val) = val_str.parse::<f64>() {
-                        conditions.push(
-                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND max_val >= ?)".to_string(),
-                        );
-                        bind_values.push(topic.to_string());
-                        bind_values.push(field.to_string());
-                        bind_values.push(val.to_string());
-                    }
-                }
-            }
-        }
-        if let Some(ref fm) = filters.field_min {
-            if let Some((topic_field, val_str)) = fm.split_once(':') {
-                if let Some((topic, field)) = topic_field.split_once('.') {
-                    if let Ok(val) = val_str.parse::<f64>() {
-                        conditions.push(
-                            "EXISTS (SELECT 1 FROM log_field_stats WHERE log_id = logs.id AND topic = ? AND field = ? AND min_val <= ?)".to_string(),
-                        );
-                        bind_values.push(topic.to_string());
-                        bind_values.push(field.to_string());
-                        bind_values.push(val.to_string());
-                    }
-                }
-            }
-        }
-
-        // Geographic bounding box filter
-        if let (Some(lat), Some(lon), Some(radius)) = (filters.lat, filters.lon, filters.radius_km) {
-            let (min_lat, max_lat, min_lon, max_lon) = super::bounding_box(lat, lon, radius);
-            conditions.push("lat BETWEEN ? AND ?".to_string());
-            bind_values.push(min_lat.to_string());
-            bind_values.push(max_lat.to_string());
-            conditions.push("lon BETWEEN ? AND ?".to_string());
-            bind_values.push(min_lon.to_string());
-            bind_values.push(max_lon.to_string());
-        }
-
-        let where_clause = if conditions.is_empty() {
-            String::new()
-        } else {
-            format!("WHERE {}", conditions.join(" AND "))
-        };
+        let (where_clause, bind_values) = build_where_sqlite(filters);
 
         // Sort
         let order_by = parse_sort(filters.sort.as_deref());
@@ -535,6 +540,59 @@ impl LogStore for SqliteStore {
         Ok(ListResponse {
             logs: logs?,
             total,
+        })
+    }
+
+    async fn facets(&self, filters: &ListFilters) -> Result<FacetsResponse, DbError> {
+        let (where_clause, bind_values) = build_where_sqlite(filters);
+
+        let columns = ["ver_hw", "vehicle_type", "ver_sw_release_str", "vibration_status"];
+        let mut results: Vec<Vec<String>> = Vec::new();
+
+        for col in &columns {
+            let sql = if where_clause.is_empty() {
+                format!("SELECT DISTINCT {col} FROM logs WHERE {col} IS NOT NULL ORDER BY {col}")
+            } else {
+                format!("SELECT DISTINCT {col} FROM logs {where_clause} AND {col} IS NOT NULL ORDER BY {col}")
+            };
+            let mut query = sqlx::query(&sql);
+            for v in &bind_values {
+                query = query.bind(v);
+            }
+            let rows = query.fetch_all(&self.pool).await?;
+            let vals: Vec<String> = rows.iter().filter_map(|r| r.try_get::<String, _>(col).ok()).collect();
+            results.push(vals);
+        }
+
+        // Tags: split comma-separated values and deduplicate
+        let tags_sql = if where_clause.is_empty() {
+            "SELECT DISTINCT tags FROM logs WHERE tags IS NOT NULL AND tags != ''".to_string()
+        } else {
+            format!("SELECT DISTINCT tags FROM logs {where_clause} AND tags IS NOT NULL AND tags != ''")
+        };
+        let mut tags_query = sqlx::query(&tags_sql);
+        for v in &bind_values {
+            tags_query = tags_query.bind(v);
+        }
+        let tag_rows = tags_query.fetch_all(&self.pool).await?;
+        let mut tag_set = std::collections::BTreeSet::new();
+        for row in &tag_rows {
+            if let Ok(tags_str) = row.try_get::<String, _>("tags") {
+                for tag in tags_str.split(',') {
+                    let t = tag.trim().to_string();
+                    if !t.is_empty() {
+                        tag_set.insert(t);
+                    }
+                }
+            }
+        }
+
+        Ok(FacetsResponse {
+            ver_hw: results.remove(0),
+            vehicle_type: results.remove(0),
+            ver_sw_release_str: results.remove(0),
+            vibration_status: results.remove(0),
+            tags: tag_set.into_iter().collect(),
         })
     }
 
@@ -836,6 +894,12 @@ impl super::LogStore for SqliteStore {
     }
 
     async fn delete_junction_data(&self, _log_id: uuid::Uuid) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn facets(&self, _filters: &super::ListFilters) -> Result<super::FacetsResponse, super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))

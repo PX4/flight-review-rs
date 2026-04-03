@@ -5,7 +5,7 @@ use axum::{
     Json,
 };
 use bytes::Bytes;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -19,6 +19,15 @@ pub async fn list_logs(
     Query(filters): Query<crate::db::ListFilters>,
 ) -> Result<Json<crate::db::ListResponse>, ApiError> {
     let result = state.db.list(&filters).await?;
+    Ok(Json(result))
+}
+
+/// GET /api/logs/facets -- distinct filter values scoped to current filters
+pub async fn list_facets(
+    State(state): State<Arc<crate::AppState>>,
+    Query(filters): Query<crate::db::ListFilters>,
+) -> Result<Json<crate::db::FacetsResponse>, ApiError> {
+    let result = state.db.facets(&filters).await?;
     Ok(Json(result))
 }
 
@@ -56,6 +65,69 @@ pub async fn delete_log(
     state.storage.delete_log_files(id).await?;
     state.db.delete(id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/logs/:id/track -- lightweight GPS track for thumbnails
+/// Returns a downsampled GPS track (max 100 points) for canvas rendering.
+/// Much smaller than fetching the full metadata.json (~2KB vs ~200KB).
+pub async fn get_track(
+    State(state): State<Arc<crate::AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Vec<TrackPointCompact>>, ApiError> {
+    let data = state
+        .storage
+        .get_file(id, "metadata.json")
+        .await
+        .map_err(|_| ApiError::NotFound)?;
+
+    let meta: serde_json::Value =
+        serde_json::from_slice(&data).map_err(|e| ApiError::Internal(format!("json: {e}")))?;
+
+    let track = meta
+        .pointer("/analysis/gps_track")
+        .and_then(|v| v.as_array())
+        .unwrap_or(&Vec::new())
+        .clone();
+
+    if track.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    // Parse and downsample
+    let full: Vec<TrackPointCompact> = track
+        .iter()
+        .filter_map(|pt| {
+            Some(TrackPointCompact {
+                lat: pt.get("lat_deg")?.as_f64()?,
+                lon: pt.get("lon_deg")?.as_f64()?,
+                m: pt.get("mode_id")?.as_u64().unwrap_or(0) as u8,
+            })
+        })
+        .collect();
+
+    let max_points = 100;
+    if full.len() <= max_points {
+        return Ok(Json(full));
+    }
+
+    // Downsample: always keep first and last, evenly sample the rest
+    let mut sampled = Vec::with_capacity(max_points);
+    sampled.push(full[0].clone());
+    let step = (full.len() - 1) as f64 / (max_points - 1) as f64;
+    for i in 1..max_points - 1 {
+        let idx = (i as f64 * step).round() as usize;
+        sampled.push(full[idx].clone());
+    }
+    sampled.push(full[full.len() - 1].clone());
+
+    Ok(Json(sampled))
+}
+
+#[derive(Serialize, Clone)]
+pub struct TrackPointCompact {
+    pub lat: f64,
+    pub lon: f64,
+    pub m: u8, // mode_id, short name to minimize payload
 }
 
 /// GET /api/logs/:id/data/:filename -- serve Parquet/metadata files
@@ -246,6 +318,29 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
         record.total_distance_m = search.total_distance_m.or(record.total_distance_m);
         record.error_count = search.error_count.or(record.error_count);
         record.warning_count = search.warning_count.or(record.warning_count);
+
+        // Reverse-geocode if location_name is still empty after conversion
+        let has_location = record
+            .location_name
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty());
+        if !has_location {
+            if let (Some(lat_val), Some(lon_val), Some(token)) =
+                (record.lat, record.lon, state.mapbox_token.as_deref())
+            {
+                if let Some(name) = crate::geocode::reverse_geocode(
+                    &state.http_client,
+                    token,
+                    lat_val,
+                    lon_val,
+                )
+                .await
+                {
+                    tracing::info!(log_id = %id, location = %name, "geocoded location (lazy)");
+                    record.location_name = Some(name);
+                }
+            }
+        }
 
         state.db.update(id, &record).await?;
     }
