@@ -8,13 +8,16 @@
   - [Backend Dependencies](#backend-dependencies)
   - [Converter Crate (`flight-review`)](#converter-crate-flight-review)
   - [Server Crate (`flight-review-server`)](#server-crate-flight-review-server)
+  - [Frontend](#frontend)
   - [CLI Tool (`ulog-convert`)](#cli-tool-ulog-convert)
   - [Two Paths](#two-paths)
   - [Workspace Layout](#workspace-layout)
   - [What Gets Stored Per Log](#what-gets-stored-per-log)
   - [API](#api)
+- [Tech Stack](#tech-stack)
 - [Build](#build)
   - [Development](#development)
+  - [Seeding Data](#seeding-data)
   - [Release Build](#release-build)
   - [Feature Flags](#feature-flags)
   - [Database Support](#database-support)
@@ -31,7 +34,7 @@
 
 ## Introduction
 
-Flight Review v2 is a complete rewrite of [PX4 Flight Review](https://github.com/PX4/flight_review) in Rust. It replaces the "parse every time you view" model with a **parse-once-store-review** architecture: ULog files are converted to per-topic [Parquet](https://parquet.apache.org/) files and a rich metadata JSON at upload time, then served as static files for client-side analysis via [DuckDB](https://duckdb.org/)-WASM. The result is sub-second log viewing with zero server-side compute, support for SQLite or Postgres, and local filesystem or S3 storage -- deployable as a single binary or a Docker container.
+Flight Review v2 is a complete rewrite of [PX4 Flight Review](https://github.com/PX4/flight_review) in Rust. It replaces the "parse every time you view" model with a **parse-once-store-review** architecture: ULog files are converted to per-topic [Parquet](https://parquet.apache.org/) files and a rich metadata JSON at upload time, then served as static files for client-side analysis via [DuckDB](https://duckdb.org/)-WASM. The frontend is a SvelteKit single-page application that queries Parquet files directly via DuckDB-WASM in the browser. The result is sub-second log viewing with zero server-side compute, support for SQLite or Postgres, and local filesystem or S3 storage -- deployable as a single binary or a Docker container.
 
 ## Architecture
 
@@ -73,6 +76,21 @@ The HTTP API server built on axum:
 - Pluggable database (SQLite, Postgres)
 - Pluggable storage (local filesystem, S3)
 - v1 migration and lazy conversion
+
+### Frontend
+
+The web frontend is a SvelteKit 5 single-page application using Svelte 5 runes for reactivity. It is built with the static adapter, producing a set of static files that can be served by the backend or any static host.
+
+Key technologies:
+
+- **SvelteKit 5** with static adapter -- client-side routing, no SSR
+- **Svelte 5 runes** -- `$state`, `$derived`, `$effect` for reactive state
+- **Tailwind CSS v4** -- utility-first styling via Vite plugin
+- **uPlot** -- high-performance time-series plotting for sensor data
+- **DuckDB-WASM** -- in-browser SQL queries over Parquet files via HTTP Range requests
+- **Mapbox GL JS** -- interactive GPS track maps
+- **Chart.js** -- statistical charts on the stats page
+- **TypeScript** throughout
 
 ### CLI Tool (`ulog-convert`)
 
@@ -122,6 +140,16 @@ flight-review-rs/
 │       │   ├── db/         # LogStore trait -- SQLite and Postgres backends
 │       │   └── storage/    # object_store -- local filesystem and S3
 │       └── Cargo.toml
+├── frontend/               # SvelteKit web application
+│   ├── src/
+│   │   ├── routes/         # SvelteKit pages and layouts
+│   │   ├── lib/            # Components, stores, utilities
+│   │   └── app.css         # Tailwind entry point
+│   ├── package.json
+│   ├── svelte.config.js
+│   └── vite.config.ts
+├── scripts/
+│   └── download-logs.sh    # Seed local instance with real logs from v1
 ├── Dockerfile
 ├── Cargo.toml              # Workspace root
 └── README.md
@@ -148,9 +176,22 @@ All files live under a single UUID directory:
 | `GET` | `/health` | Health check |
 | `POST` | `/api/upload` | Multipart upload -- accepts `.ulg` file + optional context fields |
 | `GET` | `/api/logs` | List/search logs (paginated, filtered by hardware, public/private, etc.) |
+| `GET` | `/api/logs/facets` | Distinct values for filterable fields (hardware, vehicle type, etc.) |
 | `GET` | `/api/logs/:id` | Single log record |
+| `GET` | `/api/logs/:id/track` | GeoJSON GPS track for a single log |
 | `DELETE` | `/api/logs/:id?token=<token>` | Delete log (requires delete token from upload) |
 | `GET` | `/api/logs/:id/data/:filename` | Serve Parquet/JSON/ULG files with HTTP Range support |
+| `GET` | `/api/stats` | Aggregate statistics (upload counts, vehicle types, etc.) |
+
+## Tech Stack
+
+| Layer | Stack |
+|-------|-------|
+| Backend | Rust, axum, SQLite/Postgres, object_store |
+| Converter | px4-ulog-rs, Apache Arrow/Parquet |
+| Frontend | SvelteKit 5, Svelte 5, Tailwind v4, TypeScript |
+| Visualization | uPlot, Chart.js, Mapbox GL JS |
+| Client-side data | DuckDB-WASM, Apache Arrow |
 
 ## Build
 
@@ -158,29 +199,91 @@ We support Linux, macOS, and any platform Rust targets. The project compiles to 
 
 ### Development
 
+Prerequisites: Rust toolchain (stable) and Node.js 18+.
+
 ```bash
 # Clone
 git clone https://github.com/mrpollo/flight-review-rs.git
 cd flight-review-rs
 
-# Build (debug)
+# Build backend (debug)
 cargo build
 
-# Run tests
-cargo test
-
-# Run the server locally
-cargo run -p flight-review-server -- serve --port 8080
+# Run the server locally with SQLite
+cargo run -p flight-review-server -- serve \
+  --db "sqlite://data/flight-review.db?mode=rwc" \
+  --storage "file://data/files"
 
 # Run the CLI
 cargo run -p flight-review --bin ulog-convert -- --help
 ```
+
+In a second terminal, start the frontend dev server:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite dev server runs on `http://localhost:5173` and proxies all `/api` requests to the backend at `http://localhost:8080`. Open the Vite URL in the browser for development.
+
+**Tests:**
+
+```bash
+# Backend
+cargo test
+
+# Frontend
+cd frontend && npm test
+```
+
+**Type checking:**
+
+```bash
+cd frontend && npm run check
+```
+
+### Seeding Data
+
+The `scripts/download-logs.sh` script downloads real ULog files from the v1 Flight Review instance at review.px4.io and optionally uploads them to a local v2 server. Useful for populating a development instance with realistic data.
+
+```bash
+# Download 50 logs (no upload)
+COUNT=50 ./scripts/download-logs.sh
+
+# Download 20 logs and upload to local server
+COUNT=20 UPLOAD_URL=http://localhost:8080 ./scripts/download-logs.sh
+
+# Upload previously downloaded logs only (skip download)
+UPLOAD_ONLY=true UPLOAD_URL=http://localhost:8080 ./scripts/download-logs.sh
+```
+
+Key environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `COUNT` | `100` | Number of logs to download |
+| `UPLOAD_URL` | (empty) | Server URL to upload to; empty skips upload |
+| `UPLOAD_ONLY` | `false` | Skip downloading, upload existing files from output dir |
+| `RATING_FILTER` | `good\|great` | Pipe-separated ratings to include; `none` for any |
+| `GPS_ONLY` | `true` | Only download logs with GPS-dependent flight modes |
+| `VERIFY` | `true` | Verify each file with `ulog-convert` before uploading |
+| `MIN_VERSION` | `v1.14` | Minimum PX4 version |
 
 ### Release Build
 
 ```bash
 cargo build --release
 ```
+
+Build the frontend for production:
+
+```bash
+cd frontend && npm run build
+```
+
+This produces static files in `frontend/build/` that can be served by the backend or any static file server.
 
 ### Feature Flags
 
@@ -240,6 +343,8 @@ curl http://localhost:8080/api/logs
 ```
 
 ### Docker
+
+The Dockerfile currently builds the backend only. The frontend must be built separately (`cd frontend && npm run build`) and served via a reverse proxy or integrated into the container build.
 
 ```bash
 # Build
@@ -353,7 +458,7 @@ The upload endpoint accepts optional pilot-provided metadata as multipart form f
 
 The project is under active development. Planned features:
 
-- **Frontend** -- SvelteKit web application with interactive flight log viewer (planned, work in progress)
+- **Frontend** -- SvelteKit web application with interactive flight log viewer (in progress: log list, log detail with time-series plots, GPS map, stats page)
 - **Advanced Search** -- rich filtering by vehicle type, localization sensor, vibration status, GPS quality, date ranges, parameter values, and geographic location (planned)
 - **User Accounts** -- optional authentication system with email magic links, layered on top of the existing anonymous upload model (planned)
 - **PID Analysis API** -- server-side endpoint exposing the existing PID step response analysis for frontend consumption (planned)
