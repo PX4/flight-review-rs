@@ -25,8 +25,8 @@
 		hwValue = filters.ver_hw ?? '';
 		fwValue = filters.ver_sw_release_str ?? '';
 		locationValue = filters.location_name ?? '';
-		durationMin = filters.flight_duration_min?.toString() ?? '';
-		durationMax = filters.flight_duration_max?.toString() ?? '';
+		durationMin = filters.flight_duration_min != null ? String(Math.round(filters.flight_duration_min / 60)) : '';
+		durationMax = filters.flight_duration_max != null ? String(Math.round(filters.flight_duration_max / 60)) : '';
 	});
 
 	// Fetch facets on mount
@@ -225,7 +225,7 @@
 
 				<!-- Flight Duration -->
 				<div>
-					<label for="filter-duration-min" class={labelClass}>Flight Duration (seconds)</label>
+					<label for="filter-duration-min" class={labelClass}>Flight Duration (minutes)</label>
 					<div class="flex items-center gap-2">
 						<input
 							id="filter-duration-min"
@@ -233,7 +233,7 @@
 							placeholder="Min"
 							min="0"
 							value={durationMin}
-							oninput={(e) => { durationMin = (e.target as HTMLInputElement).value; debouncedChange('flight_duration_min', durationMin, true); }}
+							oninput={(e) => { durationMin = (e.target as HTMLInputElement).value; const mins = Number(durationMin); onChange({ flight_duration_min: durationMin && !isNaN(mins) ? mins * 60 : undefined }); }}
 							class={inputClass}
 						/>
 						<span class="text-gray-400 text-sm">to</span>
@@ -242,7 +242,7 @@
 							placeholder="Max"
 							min="0"
 							value={durationMax}
-							oninput={(e) => { durationMax = (e.target as HTMLInputElement).value; debouncedChange('flight_duration_max', durationMax, true); }}
+							oninput={(e) => { durationMax = (e.target as HTMLInputElement).value; const mins = Number(durationMax); onChange({ flight_duration_max: durationMax && !isNaN(mins) ? mins * 60 : undefined }); }}
 							class={inputClass}
 						/>
 					</div>

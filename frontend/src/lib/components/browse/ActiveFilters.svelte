@@ -31,10 +31,10 @@
 			result.push({ key: 'location_name', label: `Location: ${filters.location_name}`, clearValue: undefined });
 		}
 		if (filters.flight_duration_min != null) {
-			result.push({ key: 'flight_duration_min', label: `Duration: >${filters.flight_duration_min}s`, clearValue: undefined });
+			result.push({ key: 'flight_duration_min', label: `Duration: >${Math.round(filters.flight_duration_min / 60)}m`, clearValue: undefined });
 		}
 		if (filters.flight_duration_max != null) {
-			result.push({ key: 'flight_duration_max', label: `Duration: <${filters.flight_duration_max}s`, clearValue: undefined });
+			result.push({ key: 'flight_duration_max', label: `Duration: <${Math.round(filters.flight_duration_max / 60)}m`, clearValue: undefined });
 		}
 		if (filters.date_from) {
 			result.push({ key: 'date_from', label: `From: ${filters.date_from}`, clearValue: undefined });
