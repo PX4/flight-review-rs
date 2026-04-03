@@ -27,7 +27,6 @@
 	let error = $state<string | null>(null);
 	let sortField = $state<string | null>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
-	let mobileFiltersOpen = $state(false);
 
 	function updateUrl(partial: Partial<ListFilters>) {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -100,34 +99,12 @@
 		</div>
 	</div>
 
-	<!-- Mobile filter toggle -->
-	<div class="lg:hidden mb-4">
-		<button
-			onclick={() => (mobileFiltersOpen = !mobileFiltersOpen)}
-			class="flex items-center gap-2 rounded-md bg-white px-3 py-2 text-sm font-medium text-gray-700 shadow-sm ring-1 ring-gray-300 hover:bg-gray-50 dark:bg-gray-800 dark:text-gray-300 dark:ring-gray-600 dark:hover:bg-gray-700"
-		>
-			<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
-			</svg>
-			{mobileFiltersOpen ? 'Hide Filters' : 'Show Filters'}
-		</button>
+	<!-- Filters -->
+	<div class="mb-4">
+		<FilterSidebar {filters} onChange={handleFilterChange} />
 	</div>
 
-	<!-- Mobile collapsible filters -->
-	{#if mobileFiltersOpen}
-		<div class="lg:hidden mb-6">
-			<FilterSidebar {filters} onChange={handleFilterChange} />
-		</div>
-	{/if}
-
-	<div class="flex gap-8">
-		<!-- Filter sidebar on desktop -->
-		<div class="hidden lg:block w-56 shrink-0">
-			<FilterSidebar {filters} onChange={handleFilterChange} />
-		</div>
-
-		<!-- Main content area -->
-		<div class="min-w-0 flex-1">
+	<div>
 			{#if loading}
 				<!-- Loading skeleton -->
 				<div class="animate-pulse space-y-4">
@@ -173,6 +150,5 @@
 					onChange={handlePageChange}
 				/>
 			{/if}
-		</div>
 	</div>
 </div>
