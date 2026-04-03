@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { getFilterFacets, type FilterFacets } from '$lib/api';
 	import type { ListFilters } from '$lib/types';
+	import Combobox from '$lib/components/shared/Combobox.svelte';
 
 	let { filters, onChange }: {
 		filters: ListFilters;
@@ -169,30 +170,22 @@
 				</div>
 
 				<!-- Hardware -->
-				<div>
-					<label for="filter-hw" class={labelClass}>Hardware</label>
-					<input
-						id="filter-hw"
-						type="text"
-						placeholder="e.g. Pixhawk 6C"
-						value={hwValue}
-						oninput={(e) => { hwValue = (e.target as HTMLInputElement).value; debouncedChange('ver_hw', hwValue); }}
-						class={inputClass}
-					/>
-				</div>
+				<Combobox
+					label="Hardware"
+					options={facets?.ver_hw ?? []}
+					value={hwValue}
+					placeholder="e.g. Pixhawk 6C"
+					onChange={(v) => { hwValue = v; debouncedChange('ver_hw', v); }}
+				/>
 
 				<!-- Firmware -->
-				<div>
-					<label for="filter-fw" class={labelClass}>Firmware</label>
-					<input
-						id="filter-fw"
-						type="text"
-						placeholder="e.g. 1.14.0"
-						value={fwValue}
-						oninput={(e) => { fwValue = (e.target as HTMLInputElement).value; debouncedChange('ver_sw_release_str', fwValue); }}
-						class={inputClass}
-					/>
-				</div>
+				<Combobox
+					label="Firmware"
+					options={facets?.ver_sw_release_str ?? []}
+					value={fwValue}
+					placeholder="e.g. 1.14.0"
+					onChange={(v) => { fwValue = v; debouncedChange('ver_sw_release_str', v); }}
+				/>
 
 				<!-- Location -->
 				<div>
