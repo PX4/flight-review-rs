@@ -2,8 +2,10 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { listLogs } from '$lib/api';
-	import type { ListFilters, LogRecord, ListResponse } from '$lib/types';
-	import FilterSidebar from '$lib/components/browse/FilterSidebar.svelte';
+	import type { ListFilters, ListResponse } from '$lib/types';
+	import SearchBar from '$lib/components/browse/SearchBar.svelte';
+	import AdvancedFilters from '$lib/components/browse/AdvancedFilters.svelte';
+	import ActiveFilters from '$lib/components/browse/ActiveFilters.svelte';
 	import LogTable from '$lib/components/browse/LogTable.svelte';
 	import PaginationControls from '$lib/components/browse/PaginationControls.svelte';
 
@@ -12,21 +14,49 @@
 	// Read filters from URL search params
 	let filters = $derived.by((): ListFilters => {
 		const params = page.url.searchParams;
+
+		const durationMin = params.get('flight_duration_min');
+		const durationMax = params.get('flight_duration_max');
+		const hasGps = params.get('has_gps');
+
 		return {
 			search: params.get('search') || undefined,
 			sys_name: params.get('sys_name') || undefined,
 			ver_hw: params.get('ver_hw') || undefined,
+			vehicle_type: params.get('vehicle_type') || undefined,
+			ver_sw_release_str: params.get('ver_sw_release_str') || undefined,
+			location_name: params.get('location_name') || undefined,
+			flight_duration_min: durationMin ? Number(durationMin) : undefined,
+			flight_duration_max: durationMax ? Number(durationMax) : undefined,
+			date_from: params.get('date_from') || undefined,
+			date_to: params.get('date_to') || undefined,
+			vibration_status: params.get('vibration_status') || undefined,
+			has_gps: hasGps === 'true' ? true : hasGps === 'false' ? false : undefined,
+			tag: params.get('tag') || undefined,
+			sort: params.get('sort') || undefined,
 			page: parseInt(params.get('page') || '1', 10),
 			limit: parseInt(params.get('limit') || String(DEFAULT_PAGE_SIZE), 10),
 		};
 	});
 
-	let logs = $state<LogRecord[]>([]);
+	let logs = $state<import('$lib/types').LogRecord[]>([]);
 	let total = $state(0);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let sortField = $state<string | null>('created_at');
 	let sortDir = $state<'asc' | 'desc'>('desc');
+
+	// Sync sort state from URL
+	$effect(() => {
+		const sortParam = filters.sort;
+		if (sortParam) {
+			const parts = sortParam.split(':');
+			if (parts.length === 2) {
+				sortField = parts[0];
+				sortDir = parts[1] === 'asc' ? 'asc' : 'desc';
+			}
+		}
+	});
 
 	function updateUrl(partial: Partial<ListFilters>) {
 		const params = new URLSearchParams(page.url.searchParams);
@@ -63,6 +93,7 @@
 			sortField = field;
 			sortDir = 'desc';
 		}
+		updateUrl({ sort: `${sortField}:${sortDir}` });
 	}
 
 	// Fetch data when filters change
@@ -92,30 +123,32 @@
 	<!-- Header -->
 	<div class="sm:flex sm:items-center mb-6">
 		<div class="sm:flex-auto">
-			<h1 class="text-base font-semibold text-gray-900 dark:text-gray-100">Flight Logs</h1>
+			<h1 class="text-base font-semibold text-gray-900">Flight Logs</h1>
 			{#if !loading && !error}
-				<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{total.toLocaleString()} logs found</p>
+				<p class="mt-1 text-sm text-gray-500">{total.toLocaleString()} logs found</p>
 			{/if}
 		</div>
 	</div>
 
-	<!-- Filters -->
-	<div class="mb-4">
-		<FilterSidebar {filters} onChange={handleFilterChange} />
+	<!-- Search + Filters -->
+	<div class="space-y-3 mb-6">
+		<SearchBar value={filters.search ?? ''} onChange={handleFilterChange} />
+		<AdvancedFilters {filters} onChange={handleFilterChange} />
+		<ActiveFilters {filters} onChange={handleFilterChange} />
 	</div>
 
 	<div>
 			{#if loading}
 				<!-- Loading skeleton -->
 				<div class="animate-pulse space-y-4">
-					<div class="h-8 bg-gray-200 rounded w-full dark:bg-gray-700"></div>
+					<div class="h-8 bg-gray-200 rounded w-full"></div>
 					{#each Array(8) as _}
-						<div class="h-12 bg-gray-100 rounded w-full dark:bg-gray-800"></div>
+						<div class="h-12 bg-gray-100 rounded w-full"></div>
 					{/each}
 				</div>
 			{:else if error}
 				<!-- Error state -->
-				<div class="rounded-md bg-red-50 p-4 dark:bg-red-900/20">
+				<div class="rounded-md bg-red-50 p-4">
 					<div class="flex">
 						<div class="shrink-0">
 							<svg class="size-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
@@ -123,8 +156,8 @@
 							</svg>
 						</div>
 						<div class="ml-3">
-							<h3 class="text-sm font-medium text-red-800 dark:text-red-300">Error loading logs</h3>
-							<p class="mt-1 text-sm text-red-700 dark:text-red-400">{error}</p>
+							<h3 class="text-sm font-medium text-red-800">Error loading logs</h3>
+							<p class="mt-1 text-sm text-red-700">{error}</p>
 						</div>
 					</div>
 				</div>
@@ -134,8 +167,8 @@
 					<svg class="mx-auto size-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
 						<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
 					</svg>
-					<h3 class="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">No logs found</h3>
-					<p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Try adjusting your filters or upload a new log.</p>
+					<h3 class="mt-2 text-sm font-semibold text-gray-900">No logs found</h3>
+					<p class="mt-1 text-sm text-gray-500">Try adjusting your filters or upload a new log.</p>
 				</div>
 			{:else}
 				<!-- Horizontally scrollable table wrapper for mobile -->
