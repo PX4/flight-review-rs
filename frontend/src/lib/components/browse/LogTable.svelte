@@ -112,7 +112,7 @@
 												</div>
 											</div>
 										{:else}
-											<span class="text-gray-300">\u2014</span>
+											<span class="text-gray-300">{'\u2014'}</span>
 										{/if}
 									{:else if col.key === 'created_at'}
 										<span class="flex items-center gap-1">
@@ -130,7 +130,7 @@
 									{:else if col.key === 'file_size'}
 										{formatFileSize(log.file_size)}
 									{:else}
-										\u2014
+										—
 									{/if}
 								</td>
 							{/each}
