@@ -78,7 +78,7 @@
 	<NavBar currentPath={page.url.pathname} />
 {/if}
 
-<main class="{isLogViewer ? '' : 'lg:pl-72'} overflow-x-hidden">
+<main class="{isLogViewer ? '' : 'lg:pl-72 overflow-x-hidden'}">
 	{@render children()}
 </main>
 

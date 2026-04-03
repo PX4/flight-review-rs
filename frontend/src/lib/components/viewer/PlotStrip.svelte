@@ -2,14 +2,20 @@
 	import { onMount, onDestroy } from 'svelte';
 	import uPlot from 'uplot';
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
-	import { activePlots } from '$lib/stores/logViewer';
+	import { activePlots, togglePlotMinimized } from '$lib/stores/logViewer';
 	import { timeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
 	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 
-	let { config, logId, metadata } = $props<{
+	let { config, logId, metadata, index, totalCount, onMoveUp, onMoveDown, onDragStart, onDragEnd } = $props<{
 		config: PlotConfig;
 		logId: string;
 		metadata: FlightMetadata;
+		index?: number;
+		totalCount?: number;
+		onMoveUp?: () => void;
+		onMoveDown?: () => void;
+		onDragStart?: (e: DragEvent) => void;
+		onDragEnd?: (e: DragEvent) => void;
 	}>();
 
 	// Module-level session cache (shared across all PlotStrip instances)
@@ -42,6 +48,16 @@
 		activePlots.update((plots) => plots.filter((p) => p.id !== config.id));
 	}
 
+	function downloadPng() {
+		if (!chartEl) return;
+		const canvas = chartEl.querySelector('canvas');
+		if (!canvas) return;
+		const link = document.createElement('a');
+		link.download = `${config.topic}.png`;
+		link.href = canvas.toDataURL('image/png');
+		link.click();
+	}
+
 	async function loadAndRender(fields: string[], colors: string[]) {
 		const fieldsKey = fields.join(',');
 		if (fieldsKey === lastFieldsKey && uplot) return;
@@ -57,8 +73,8 @@
 			});
 
 			if (!result) {
-				error = 'No data returned';
-				loading = false;
+				// Auto-remove plots with no data (e.g. field names don't exist in this log version)
+				removePlot();
 				return;
 			}
 
@@ -208,7 +224,51 @@
 <div class="rounded-lg ring-1 ring-gray-200 bg-white overflow-hidden" bind:this={containerEl}>
 	<div class="flex items-center justify-between px-2 sm:px-4 py-2 sm:py-2.5 border-b border-gray-100">
 		<div class="flex flex-wrap items-center gap-2 sm:gap-4">
-			<span class="text-xs sm:text-sm font-medium text-gray-900">{config.topic}</span>
+			{#if onDragStart}
+				<!-- Drag handle: visible on md+ screens -->
+				<div
+					class="hidden md:flex items-center cursor-grab active:cursor-grabbing text-gray-300 hover:text-gray-500"
+					draggable="true"
+					ondragstart={onDragStart}
+					ondragend={onDragEnd}
+					role="button"
+					tabindex="0"
+					aria-label="Drag to reorder"
+				>
+					<svg class="size-5" viewBox="0 0 20 20" fill="currentColor">
+						<circle cx="7" cy="4" r="1.5" /><circle cx="13" cy="4" r="1.5" />
+						<circle cx="7" cy="10" r="1.5" /><circle cx="13" cy="10" r="1.5" />
+						<circle cx="7" cy="16" r="1.5" /><circle cx="13" cy="16" r="1.5" />
+					</svg>
+				</div>
+				<!-- Mobile reorder buttons: visible below md -->
+				<div class="flex md:hidden flex-col -space-y-0.5">
+					<button
+						class="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-default"
+						onclick={onMoveUp}
+						disabled={index === 0}
+						aria-label="Move plot up"
+					>
+						<svg class="size-3.5" viewBox="0 0 20 20" fill="currentColor">
+							<path fill-rule="evenodd" d="M10 3.293l-6.354 6.353a1 1 0 001.415 1.414L10 6.121l4.939 4.939a1 1 0 001.414-1.414L10 3.293z" clip-rule="evenodd" />
+						</svg>
+					</button>
+					<button
+						class="text-gray-400 hover:text-gray-600 disabled:opacity-30 disabled:cursor-default"
+						onclick={onMoveDown}
+						disabled={index === (totalCount ?? 1) - 1}
+						aria-label="Move plot down"
+					>
+						<svg class="size-3.5" viewBox="0 0 20 20" fill="currentColor">
+							<path fill-rule="evenodd" d="M10 16.707l6.354-6.353a1 1 0 00-1.415-1.414L10 13.879l-4.939-4.939a1 1 0 00-1.414 1.414L10 16.707z" clip-rule="evenodd" />
+						</svg>
+					</button>
+				</div>
+			{/if}
+			<span class="text-xs sm:text-sm font-medium text-gray-900">{config.yLabel && config.yLabel !== config.topic ? config.yLabel : config.topic}</span>
+			{#if config.yLabel && config.yLabel !== config.topic}
+				<span class="text-[10px] text-gray-400">{config.topic}</span>
+			{/if}
 			<div class="flex flex-wrap items-center gap-x-1.5 sm:gap-x-3 gap-y-1 text-xs">
 				{#each config.fields as field, i}
 					<span class="flex items-center gap-1.5">
@@ -218,13 +278,32 @@
 				{/each}
 			</div>
 		</div>
-		<button class="text-gray-400 hover:text-gray-600" onclick={removePlot} aria-label="Remove plot">
-			<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
-			</svg>
-		</button>
+		<div class="flex items-center gap-1">
+			<button class="text-gray-400 hover:text-gray-600" onclick={downloadPng} aria-label="Download as PNG">
+				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12M12 16.5V3" />
+				</svg>
+			</button>
+			<button class="text-gray-400 hover:text-gray-600" onclick={() => togglePlotMinimized(config.id)} aria-label={config.minimized ? 'Expand plot' : 'Minimize plot'}>
+				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+					{#if config.minimized}
+						<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+					{:else}
+						<path stroke-linecap="round" stroke-linejoin="round" d="M4.5 15.75l7.5-7.5 7.5 7.5" />
+					{/if}
+				</svg>
+			</button>
+			<button class="text-gray-400 hover:text-gray-600" onclick={removePlot} aria-label="Remove plot">
+				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+				</svg>
+			</button>
+		</div>
 	</div>
-	<div class="relative bg-gray-50" style="min-height: {plotHeight}px;">
+	<div
+		class="relative bg-gray-50 transition-all duration-200 ease-in-out"
+		style="min-height: {config.minimized ? 0 : plotHeight}px; max-height: {config.minimized ? '0px' : 'none'}; overflow: {config.minimized ? 'hidden' : 'visible'};"
+	>
 		{#if loading}
 			<div class="absolute inset-0 flex items-center justify-center">
 				<svg class="size-6 animate-spin text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">

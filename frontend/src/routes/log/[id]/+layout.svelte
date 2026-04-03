@@ -6,11 +6,12 @@
 	import { getLog, getMetadata, ApiError } from '$lib/api';
 	import { terminateDuckDB } from '$lib/utils/duckdb';
 	import { timeRange } from '$lib/stores/plotSync';
+	import { builderOpen } from '$lib/stores/logViewer';
 	import LoadingSpinner from '$lib/components/shared/LoadingSpinner.svelte';
 	import ErrorBanner from '$lib/components/shared/ErrorBanner.svelte';
 	import FlightSummaryHeader from '$lib/components/viewer/FlightSummaryHeader.svelte';
 	import FlightModeTimeline from '$lib/components/viewer/FlightModeTimeline.svelte';
-	import TopicTreeSidebar from '$lib/components/viewer/TopicTreeSidebar.svelte';
+	import PlotBuilderPanel from '$lib/components/viewer/PlotBuilderPanel.svelte';
 
 	let { children } = $props<{ children: Snippet }>();
 
@@ -18,7 +19,6 @@
 	let metadata = $state<FlightMetadata | null>(null);
 	let loading = $state(true);
 	let error = $state('');
-	let mobileTopicsOpen = $state(false);
 
 	// Make metadata available to child routes via context
 	setContext('log-viewer', {
@@ -116,29 +116,16 @@
 			<img src="/flight-review-logo.svg" alt="Flight Review" class="h-7 w-auto opacity-60" />
 		</div>
 
-		<!-- Flight Summary Header -->
-		<FlightSummaryHeader {metadata} logId={logRecord.id} />
+		<!-- Sticky header: summary + flight modes + tab bar -->
+		<div class="sticky top-0 z-30 bg-white shadow-sm">
+			<FlightSummaryHeader {metadata} logId={logRecord.id} vehicleType={logRecord.vehicle_type} locationName={logRecord.location_name} />
 
-		<!-- Flight Mode Timeline -->
-		{#if metadata.analysis?.flight_modes && metadata.analysis.flight_modes.length > 0}
-			<FlightModeTimeline segments={metadata.analysis.flight_modes} />
-		{/if}
-
-		<!-- Main area: sidebar + content -->
-		<div class="flex flex-1 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
-			<!-- Topic Tree Sidebar (desktop, plots tab only) -->
-			{#if activeTab === ''}
-				<div class="hidden md:block md:w-52 lg:w-64 md:border-r md:border-gray-200 bg-white shrink-0 dark:md:border-gray-700 dark:bg-gray-900">
-				<div class="sticky top-0 h-dvh overflow-y-auto flex flex-col">
-					<TopicTreeSidebar {metadata} />
-				</div>
-			</div>
+			{#if metadata.analysis?.flight_modes && metadata.analysis.flight_modes.length > 0}
+				<FlightModeTimeline segments={metadata.analysis.flight_modes} />
 			{/if}
 
-			<!-- Content area with tabs -->
-			<div class="flex-1 flex flex-col {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
-				<!-- Tab bar -->
-				<div class="border-b border-gray-200 px-3 sm:px-4 overflow-hidden">
+			<!-- Tab bar -->
+			<div class="border-b border-gray-200 px-3 sm:px-4 overflow-hidden">
 					<div class="flex flex-wrap gap-x-3 sm:gap-x-4">
 						{#each tabs as tab}
 							<a
@@ -151,19 +138,36 @@
 								{tab.label}
 							</a>
 						{/each}
-						<div class="ml-auto flex items-center">
+						<div class="ml-auto flex items-center gap-2">
 							{#if activeTab === ''}
 								<button
-									class="rounded-md bg-white px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50"
+									class="flex items-center gap-1.5 rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500"
+									onclick={() => builderOpen.set(true)}
+								>
+									<svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 010 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 010-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28z" />
+										<path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+									</svg>
+									Edit Plots
+								</button>
+								<button
+									class="flex items-center gap-1.5 rounded-md bg-white px-3 py-1 text-xs font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50"
 									onclick={resetZoom}
 								>
+									<svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
+									</svg>
 									Reset Zoom
 								</button>
 							{/if}
 						</div>
 					</div>
 				</div>
+		</div>
 
+		<!-- Main area: content -->
+		<div class="flex flex-1 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
+			<div class="flex-1 flex flex-col {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
 				<!-- Panel content (from child route) -->
 				<div class="{activeTab === '/map' ? 'flex-1 flex flex-col min-h-0' : ''} p-3 sm:p-4 space-y-4 overflow-x-hidden">
 					{@render children()}
@@ -172,44 +176,6 @@
 		</div>
 	</div>
 
-	<!-- Floating "Topics" button for mobile (plots tab only) -->
-	{#if activeTab === ''}
-		<button
-			onclick={() => (mobileTopicsOpen = true)}
-			class="fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full bg-indigo-600 px-4 py-3 text-sm font-medium text-white shadow-lg hover:bg-indigo-500 md:hidden"
-			aria-label="Open topic tree"
-		>
-			<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-				<path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" />
-			</svg>
-			Topics
-		</button>
-	{/if}
-
-	<!-- Mobile topic sidebar slide-over -->
-	{#if mobileTopicsOpen && activeTab === ''}
-		<div class="fixed inset-0 z-50 md:hidden">
-			<div
-				class="fixed inset-0 bg-gray-900/80"
-				onclick={() => (mobileTopicsOpen = false)}
-				role="presentation"
-			></div>
-			<div class="fixed inset-y-0 right-0 z-50 w-full max-w-xs overflow-y-auto bg-white dark:bg-gray-900">
-				<div class="flex items-center justify-between border-b border-gray-200 px-4 py-3 dark:border-gray-700">
-					<h2 class="text-sm font-semibold text-gray-900 dark:text-gray-100">Topics</h2>
-					<button
-						type="button"
-						class="-m-2 p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-						aria-label="Close topics"
-						onclick={() => (mobileTopicsOpen = false)}
-					>
-						<svg class="size-5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-							<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-						</svg>
-					</button>
-				</div>
-				<TopicTreeSidebar {metadata} />
-			</div>
-		</div>
-	{/if}
+	<!-- Plot Builder slide-over panel -->
+	<PlotBuilderPanel {metadata} />
 {/if}

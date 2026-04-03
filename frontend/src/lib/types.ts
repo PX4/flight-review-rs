@@ -24,6 +24,7 @@ export interface LogRecord {
   tags: string | null;
   location_name: string | null;
   mission_type: string | null;
+  vehicle_type: string | null;
 }
 
 export interface ListFilters {
@@ -198,4 +199,5 @@ export interface PlotConfig {
   fields: string[];
   yLabel: string;
   colors: string[];
+  minimized?: boolean;
 }
