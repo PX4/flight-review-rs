@@ -24,12 +24,35 @@ export async function getLog(id: string): Promise<LogRecord> {
 
 export async function listLogs(filters: ListFilters): Promise<ListResponse> {
   const params = new URLSearchParams();
+  if (filters.search) params.set('search', filters.search);
   if (filters.sys_name) params.set('sys_name', filters.sys_name);
   if (filters.ver_hw) params.set('ver_hw', filters.ver_hw);
-  if (filters.search) params.set('search', filters.search);
+  if (filters.vehicle_type) params.set('vehicle_type', filters.vehicle_type);
+  if (filters.ver_sw_release_str) params.set('ver_sw_release_str', filters.ver_sw_release_str);
+  if (filters.location_name) params.set('location_name', filters.location_name);
+  if (filters.flight_duration_min != null) params.set('flight_duration_min', String(filters.flight_duration_min));
+  if (filters.flight_duration_max != null) params.set('flight_duration_max', String(filters.flight_duration_max));
+  if (filters.date_from) params.set('date_from', filters.date_from);
+  if (filters.date_to) params.set('date_to', filters.date_to);
+  if (filters.vibration_status) params.set('vibration_status', filters.vibration_status);
+  if (filters.has_gps != null) params.set('has_gps', String(filters.has_gps));
+  if (filters.tag) params.set('tag', filters.tag);
+  if (filters.sort) params.set('sort', filters.sort);
   params.set('offset', String((filters.page - 1) * filters.limit));
   params.set('limit', String(filters.limit));
   return apiFetch(`/logs?${params}`);
+}
+
+export interface FilterFacets {
+  ver_hw: string[];
+  vehicle_type: string[];
+  ver_sw_release_str: string[];
+  vibration_status: string[];
+  tags: string[];
+}
+
+export async function getFilterFacets(): Promise<FilterFacets> {
+  return apiFetch('/logs/facets');
 }
 
 export function uploadLog(

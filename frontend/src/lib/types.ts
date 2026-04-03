@@ -28,9 +28,20 @@ export interface LogRecord {
 }
 
 export interface ListFilters {
+  search?: string;
   sys_name?: string;
   ver_hw?: string;
-  search?: string;
+  vehicle_type?: string;
+  ver_sw_release_str?: string;
+  location_name?: string;
+  flight_duration_min?: number;
+  flight_duration_max?: number;
+  date_from?: string;
+  date_to?: string;
+  vibration_status?: string;
+  has_gps?: boolean;
+  tag?: string;
+  sort?: string;
   page: number;
   limit: number;
 }

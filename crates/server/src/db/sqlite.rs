@@ -291,8 +291,8 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
         bind_values.push(sys_name.clone());
     }
     if let Some(ref ver_hw) = filters.ver_hw {
-        conditions.push("ver_hw = ?".to_string());
-        bind_values.push(ver_hw.clone());
+        conditions.push("ver_hw LIKE ?".to_string());
+        bind_values.push(format!("%{}%", ver_hw));
     }
     if let Some(ref search) = filters.search {
         conditions.push(
