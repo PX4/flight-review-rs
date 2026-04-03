@@ -231,6 +231,8 @@ pub struct ListFilters {
     pub vibration_status: Option<String>,
     /// Filter by GPS presence (lat IS NOT NULL)
     pub has_gps: Option<bool>,
+    /// Filter by location name (substring match)
+    pub location_name: Option<String>,
     /// Sort column and direction, e.g. "created_at:desc", "flight_duration_s:asc"
     pub sort: Option<String>,
 
@@ -260,6 +262,15 @@ pub struct ListFilters {
 pub struct ListResponse {
     pub logs: Vec<LogRecord>,
     pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FacetsResponse {
+    pub ver_hw: Vec<String>,
+    pub vehicle_type: Vec<String>,
+    pub ver_sw_release_str: Vec<String>,
+    pub vibration_status: Vec<String>,
+    pub tags: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -309,6 +320,7 @@ pub trait LogStore: Send + Sync {
     async fn insert(&self, record: &LogRecord) -> Result<(), DbError>;
     async fn get(&self, id: Uuid) -> Result<Option<LogRecord>, DbError>;
     async fn list(&self, filters: &ListFilters) -> Result<ListResponse, DbError>;
+    async fn facets(&self, filters: &ListFilters) -> Result<FacetsResponse, DbError>;
     async fn delete(&self, id: Uuid) -> Result<bool, DbError>;
     async fn update(&self, id: Uuid, record: &LogRecord) -> Result<(), DbError>;
 

@@ -22,6 +22,15 @@ pub async fn list_logs(
     Ok(Json(result))
 }
 
+/// GET /api/logs/facets -- distinct filter values scoped to current filters
+pub async fn list_facets(
+    State(state): State<Arc<crate::AppState>>,
+    Query(filters): Query<crate::db::ListFilters>,
+) -> Result<Json<crate::db::FacetsResponse>, ApiError> {
+    let result = state.db.facets(&filters).await?;
+    Ok(Json(result))
+}
+
 /// GET /api/logs/:id -- single log metadata
 pub async fn get_log(
     State(state): State<Arc<crate::AppState>>,
