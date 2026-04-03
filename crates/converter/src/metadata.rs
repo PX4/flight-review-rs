@@ -345,6 +345,11 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                 let buffer = multi_info_buffers
                     .entry(msg.key.to_string())
                     .or_default();
+                // Each continued fragment is a separate line — add newline
+                // separator so they don't run together when displayed.
+                if !buffer.is_empty() && msg.is_continued {
+                    buffer.push(b'\n');
+                }
                 buffer.extend_from_slice(msg.value);
             }
         }
