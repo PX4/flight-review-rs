@@ -127,7 +127,7 @@ pub async fn upload(
     let lon = result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg);
     let user_gave_location = location_name
         .as_ref()
-        .map_or(false, |s| !s.trim().is_empty());
+        .is_some_and(|s| !s.trim().is_empty());
     if !user_gave_location {
         if let (Some(lat_val), Some(lon_val), Some(token)) = (lat, lon, state.mapbox_token.as_deref())
         {

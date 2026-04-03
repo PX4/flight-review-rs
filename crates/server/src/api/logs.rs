@@ -323,7 +323,7 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
         let has_location = record
             .location_name
             .as_ref()
-            .map_or(false, |s| !s.trim().is_empty());
+            .is_some_and(|s| !s.trim().is_empty());
         if !has_location {
             if let (Some(lat_val), Some(lon_val), Some(token)) =
                 (record.lat, record.lon, state.mapbox_token.as_deref())
