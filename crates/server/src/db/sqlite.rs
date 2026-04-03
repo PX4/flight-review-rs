@@ -898,4 +898,10 @@ impl super::LogStore for SqliteStore {
             "sqlite feature is not enabled".into(),
         )))
     }
+
+    async fn facets(&self, _filters: &super::ListFilters) -> Result<super::FacetsResponse, super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
 }
