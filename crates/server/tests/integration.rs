@@ -61,6 +61,8 @@ async fn start_server() -> (String, tokio::task::JoinHandle<()>) {
         db,
         storage,
         v1_ulg_prefix: None,
+        mapbox_token: None,
+        http_client: reqwest::Client::new(),
     });
 
     use axum::{
