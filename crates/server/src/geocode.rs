@@ -2,9 +2,10 @@ use std::time::Duration;
 
 /// Reverse-geocode a lat/lon pair using the Mapbox Geocoding API v6.
 ///
-/// Returns a human-readable location string (e.g. "San Francisco, United States")
-/// or `None` on any error. This function never panics and is designed to be
-/// best-effort — upload should not fail because geocoding is unavailable.
+/// Returns a location string formatted as "City, Country [CC]" where CC is the
+/// ISO 3166-1 alpha-2 country code (e.g. "San Francisco, United States [US]").
+/// Returns `None` on any error. Best-effort — upload should not fail because
+/// geocoding is unavailable.
 pub async fn reverse_geocode(
     client: &reqwest::Client,
     token: &str,
@@ -30,40 +31,72 @@ pub async fn reverse_geocode(
 
     let body: serde_json::Value = resp.json().await.ok()?;
 
-    // Try to extract a useful location name from the response.
-    // The v6 API returns features sorted by relevance; the first one with
-    // type "place" gives us the city, and "country" gives the country.
     let features = body.get("features")?.as_array()?;
 
     let mut place: Option<&str> = None;
     let mut country: Option<&str> = None;
+    let mut country_code: Option<String> = None;
 
     for feature in features {
-        let props = feature.get("properties")?;
-        let feat_type = props.get("feature_type").and_then(|v| v.as_str())?;
+        let props = match feature.get("properties") {
+            Some(p) => p,
+            None => continue,
+        };
+        let feat_type = match props.get("feature_type").and_then(|v| v.as_str()) {
+            Some(t) => t,
+            None => continue,
+        };
+
         match feat_type {
             "place" if place.is_none() => {
                 place = props.get("name").and_then(|v| v.as_str());
             }
             "country" if country.is_none() => {
                 country = props.get("name").and_then(|v| v.as_str());
+                country_code = props
+                    .get("country_code")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_uppercase());
             }
             _ => {}
         }
+
+        // Extract country info from context on any feature
+        if country_code.is_none() || country.is_none() {
+            if let Some(ctx) = props
+                .get("context")
+                .and_then(|c| c.get("country"))
+            {
+                if country_code.is_none() {
+                    country_code = ctx
+                        .get("country_code")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_uppercase());
+                }
+                if country.is_none() {
+                    country = ctx.get("name").and_then(|v| v.as_str());
+                }
+            }
+        }
     }
 
-    match (place, country) {
-        (Some(p), Some(c)) => Some(format!("{}, {}", p, c)),
-        (Some(p), None) => Some(p.to_string()),
-        (None, Some(c)) => Some(c.to_string()),
+    let base = match (place, country) {
+        (Some(p), Some(c)) => format!("{}, {}", p, c),
+        (Some(p), None) => p.to_string(),
+        (None, Some(c)) => c.to_string(),
         (None, None) => {
-            // Fallback: try full_address from the first feature
             features
                 .first()
                 .and_then(|f| f.get("properties"))
                 .and_then(|p| p.get("full_address"))
                 .and_then(|v| v.as_str())
-                .map(String::from)
+                .map(String::from)?
         }
+    };
+
+    // Append country code if available: "City, Country [CC]"
+    match country_code {
+        Some(cc) => Some(format!("{} [{}]", base, cc)),
+        None => Some(base),
     }
 }
