@@ -3,7 +3,21 @@
 	import { formatDuration } from '$lib/utils/formatters';
 	import { getHardwareName } from '$lib/utils/hardwareNames';
 
-	let { metadata, logId } = $props<{ metadata: FlightMetadata; logId: string }>();
+	let { metadata, logId, vehicleType, locationName } = $props<{ metadata: FlightMetadata; logId: string; vehicleType?: string | null; locationName?: string | null }>();
+
+	// Parse location_name: "City, Country [CC]" → { city, country, countryCode, flag }
+	const location = $derived.by(() => {
+		if (!locationName) return null;
+		const ccMatch = locationName.match(/\[([A-Z]{2})\]$/);
+		const cc = ccMatch ? ccMatch[1] : null;
+		const name = ccMatch ? locationName.replace(/\s*\[[A-Z]{2}\]$/, '') : locationName;
+		const parts = name.split(', ');
+		const city = parts.length > 1 ? parts[0] : null;
+		const country = parts.length > 1 ? parts.slice(1).join(', ') : parts[0];
+		// Convert country code to flag emoji (regional indicator symbols)
+		const flag = cc ? String.fromCodePoint(...[...cc].map(c => 0x1F1E6 + c.charCodeAt(0) - 65)) : null;
+		return { city, country, flag };
+	});
 
 	const stats = $derived(metadata.analysis?.stats);
 	const battery = $derived(metadata.analysis?.battery);
@@ -39,15 +53,43 @@
 		return { text: 'Critical', bg: 'bg-red-50 ring-1 ring-red-600/20', fg: 'text-red-700' };
 	}
 
+	function vehicleIconPath(type: string | null | undefined): string {
+		switch (type?.toLowerCase()) {
+			case 'multirotor': return '/icons/quadrotor.svg';
+			case 'fixed wing': return '/icons/fixedwing.svg';
+			case 'vtol': return '/icons/vtol.svg';
+			case 'rover': return '/icons/rover.svg';
+			case 'boat': return '/icons/submarine.svg';
+			case 'submarine': return '/icons/submarine.svg';
+			default: return '/icons/unknown.svg';
+		}
+	}
+
 	const vibe = $derived(vibrationBadge(vibration?.status));
 </script>
 
 <div class="border-b border-gray-200 bg-gray-50">
 	<!-- Mobile/Tablet: horizontal scroll, single row -->
 	<dl class="flex overflow-x-auto lg:hidden divide-x divide-gray-200 scrollbar-none">
-		<div class="shrink-0 px-3 py-1.5">
-			<dt class="text-[10px] text-gray-500">Vehicle</dt>
-			<dd class="text-xs font-semibold text-gray-900 whitespace-nowrap">{metadata.sys_name ?? '\u2014'}</dd>
+		<div class="shrink-0 px-3 py-1.5 flex items-center gap-2">
+			<img src={vehicleIconPath(vehicleType)} alt={vehicleType ?? ''} class="size-8 opacity-70" />
+			<dd class="text-xs font-semibold text-gray-900 whitespace-nowrap">{vehicleType ?? metadata.sys_name ?? '\u2014'}</dd>
+		</div>
+		<div class="shrink-0 px-3 py-1.5 flex items-center gap-1.5">
+			{#if location}
+				{#if location.flag}<span class="text-base">{location.flag}</span>{/if}
+				<div class="flex flex-col">
+					{#if location.country}<dd class="text-xs font-semibold text-gray-900 whitespace-nowrap">{location.country}</dd>{/if}
+					{#if location.city}<dd class="text-[10px] text-gray-500 whitespace-nowrap">{location.city}</dd>{/if}
+				</div>
+			{:else}
+				<svg class="size-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+					<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
+				</svg>
+				<dd class="text-xs text-gray-400 whitespace-nowrap">No Location</dd>
+			{/if}
 		</div>
 		<div class="shrink-0 px-3 py-1.5">
 			<dt class="text-[10px] text-gray-500">Hardware</dt>
@@ -101,9 +143,25 @@
 	</dl>
 	<!-- Desktop: flex layout -->
 	<dl class="hidden lg:flex lg:divide-x divide-gray-200 lg:px-0">
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Vehicle</dt>
-			<dd class="text-sm font-semibold text-gray-900 mt-0.5 truncate">{metadata.sys_name ?? '\u2014'}</dd>
+		<div class="px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-3">
+			<img src={vehicleIconPath(vehicleType)} alt={vehicleType ?? ''} class="size-10 opacity-70" />
+			<dd class="text-sm font-semibold text-gray-900 whitespace-nowrap">{vehicleType ?? metadata.sys_name ?? '\u2014'}</dd>
+		</div>
+		<div class="px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-2">
+			{#if location}
+				{#if location.flag}<span class="text-2xl">{location.flag}</span>{/if}
+				<div class="flex flex-col">
+					{#if location.country}<dd class="text-sm font-semibold text-gray-900 whitespace-nowrap">{location.country}</dd>{/if}
+					{#if location.city}<dd class="text-xs text-gray-500 whitespace-nowrap">{location.city}</dd>{/if}
+				</div>
+			{:else}
+				<svg class="size-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+					<path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+					<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+					<path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
+				</svg>
+				<dd class="text-sm text-gray-400 whitespace-nowrap">No Location</dd>
+			{/if}
 		</div>
 		<div class="px-2 lg:px-4 py-2 lg:py-3">
 			<dt class="text-xs text-gray-500">Hardware</dt>
