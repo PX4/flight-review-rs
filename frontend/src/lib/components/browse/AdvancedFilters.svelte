@@ -21,10 +21,13 @@
 	// Filter firmware versions: stable only by default, all if checkbox is checked
 	const firmwareOptions = $derived.by(() => {
 		const all = facets?.ver_sw_release_str ?? [];
-		// Normalize: ensure v prefix for display
-		const normalized = all.map(v => v.startsWith('v') ? v : `v${v}`);
+		// Normalize: ensure v prefix, strip -release suffix (legacy format)
+		const normalized = [...new Set(all.map(v => {
+			let s = v.startsWith('v') ? v : `v${v}`;
+			return s.replace(/-release$/, '');
+		}))].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
 		if (includePreReleases) return normalized;
-		// Stable = no suffix after version numbers (no -dev, -alpha, -beta, -rc)
+		// Stable = just vX.Y.Z with no suffix
 		return normalized.filter(v => /^v\d+\.\d+\.\d+$/.test(v));
 	});
 	let durationMin = $state('');
