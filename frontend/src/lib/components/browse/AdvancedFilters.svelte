@@ -174,19 +174,11 @@
 					<input
 						id="filter-hw"
 						type="text"
-						list="hw-options"
 						placeholder="e.g. Pixhawk 6C"
 						value={hwValue}
 						oninput={(e) => { hwValue = (e.target as HTMLInputElement).value; debouncedChange('ver_hw', hwValue); }}
 						class={inputClass}
 					/>
-					{#if facets?.ver_hw}
-						<datalist id="hw-options">
-							{#each facets.ver_hw as hw}
-								<option value={hw}></option>
-							{/each}
-						</datalist>
-					{/if}
 				</div>
 
 				<!-- Firmware -->
@@ -195,19 +187,11 @@
 					<input
 						id="filter-fw"
 						type="text"
-						list="fw-options"
 						placeholder="e.g. 1.14.0"
 						value={fwValue}
 						oninput={(e) => { fwValue = (e.target as HTMLInputElement).value; debouncedChange('ver_sw_release_str', fwValue); }}
 						class={inputClass}
 					/>
-					{#if facets?.ver_sw_release_str}
-						<datalist id="fw-options">
-							{#each facets.ver_sw_release_str as fw}
-								<option value={fw}></option>
-							{/each}
-						</datalist>
-					{/if}
 				</div>
 
 				<!-- Location -->
