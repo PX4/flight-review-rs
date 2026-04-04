@@ -251,29 +251,44 @@ $ curl -F file=@input.ulg http://localhost:8080/api/upload
 
 ## Performance Budget
 
-Every analyzer adds work to the `analyze()` streaming pass. To prevent
-regressions:
+The upload endpoint is synchronous — the client waits for `convert_ulog()` to
+finish before getting a response. Diagnostics run inside that path. If they're
+slow, the user sees a slow upload, and at scale it ties up server threads.
+This is a hard UX constraint, not just a nice-to-have.
 
-### Benchmark Gate
+### Absolute Time Budget
 
-A conversion benchmark (`benches/convert.rs`) measures end-to-end
-`convert_ulog()` time against a reference ULog fixture. CI enforces:
+The total `convert_ulog()` call — parsing, metadata extraction, analysis
+(including diagnostics), and Parquet writing — must complete within:
 
-- **Threshold:** PRs that regress conversion time by more than **10%** vs the
-  baseline are blocked.
-- **Measurement:** `cargo bench` using `criterion`, run on CI with a pinned
-  fixture file.
-- **Per-analyzer overhead:** Each analyzer should add no more than **5%** to
-  the total `analyze()` pass time. If it does, it needs optimization or must
-  justify the cost in the PR description.
+| File size | Max wall-clock time |
+|-----------|-------------------|
+| < 10 MB   | **500 ms**        |
+| 10–100 MB | **2 seconds**     |
+| 100–512 MB| **10 seconds**    |
+
+These limits apply to the full pipeline, not just diagnostics. But diagnostics
+must not be the reason the budget is blown.
+
+### CI Enforcement
+
+A conversion benchmark (`benches/convert.rs`) using `criterion` runs against
+reference ULog fixtures at each size tier. CI blocks PRs that:
+
+- Push any tier beyond its absolute time budget on the CI runner.
+- Regress total conversion time by more than **10%** vs the baseline, even if
+  still under the absolute limit.
 
 ### What This Means for Contributors
 
-- Keep analyzer logic O(n) in message count. No quadratic scans, no
+- Keep analyzer logic **O(n)** in message count. No quadratic scans, no
   unbounded buffers.
-- Sliding windows should have a fixed max size.
+- Sliding windows must have a **fixed max size**.
 - If an analyzer needs heavy computation (e.g., FFT for vibration frequency
-  analysis), document the expected overhead and benchmark it.
+  analysis), document the expected overhead and include `cargo bench` results
+  in the PR description.
+- If your analyzer can't meet the budget, it doesn't ship — optimize first or
+  propose making it opt-in / CLI-only.
 
 ## Storage & API
 
