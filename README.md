@@ -456,18 +456,6 @@ The upload endpoint accepts optional pilot-provided metadata as multipart form f
 
 ## Roadmap
 
-### Shipped
-
-- **Frontend** -- SvelteKit web application with upload, browse, log viewer (time-series plots via uPlot + DuckDB-WASM, GPS map, messages, parameters, system diagnostics), and stats dashboard
-- **Plot Builder** -- slide-over panel for adding/removing plot fields, drag-and-drop reorder, minimize/expand, PNG export, localStorage persistence
-- **Advanced Search** -- full-text search across 9 fields, advanced filters (vehicle type, hardware, firmware version with canonical PX4 release list, location, duration, date range, vibration status, GPS), filter chips, combobox dropdowns populated from facets endpoint
-- **System Diagnostics** -- parsed process table with CPU/stack bars, perf counter table with timing bars and jitter warnings
-- **Vehicle Type Icons** -- proper SVG icons for quadrotor, fixed-wing, VTOL, rover, etc.
-- **Reverse Geocoding** -- country flags and city/country display from Mapbox geocoding at upload time
-- **Log Seeding** -- script to download and upload real logs from Flight Review v1 for testing
-
-### Planned
-
 - **User Accounts** -- optional authentication with email magic links, layered on top of the existing anonymous upload model
 - **PID Analysis API** -- server-side endpoint exposing the existing PID step response analysis for frontend consumption
 - **Dark Mode Polish** -- consistent dark mode across all pages (foundation exists but not fully polished)
