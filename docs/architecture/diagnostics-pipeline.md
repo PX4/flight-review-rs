@@ -20,6 +20,12 @@ introducing external runtime dependencies.
 4. **Zero false-positive tolerance for heuristics.** Deterministic rules must
    have clear physical justification. Statistical models are opt-in and clearly
    labeled as experimental.
+5. **CLI-first development.** All analyzers must work via the `ulog_convert`
+   CLI tool first. The server calls the same code — it is not the place to
+   develop or validate new analysis.
+6. **Performance-budgeted.** Every analyzer runs within a measured time budget.
+   PRs that regress conversion benchmarks beyond the allowed threshold are
+   blocked by CI.
 
 ## Current Processing Pipeline
 
@@ -38,15 +44,22 @@ are promoted to DB columns for indexed search.
 
 ### Where It Fits
 
-A new `diagnostics` module in the converter crate, called after `analyze()`:
+Diagnostics are **not** a separate pass. They run inside the existing
+`analyze()` streaming callback, alongside the current stats, battery, GPS, and
+vibration collectors. This avoids adding a redundant pass over the same data:
 
 ```
 convert_ulog()
-├── extract_metadata()
-├── analyze()
-├── run_diagnostics()                   // NEW — 3rd streaming pass
+├── extract_metadata()                  // 1st streaming pass
+├── analyze()                           // 2nd streaming pass
+│   ├── existing collectors (stats, battery, GPS, vibration, modes, ...)
+│   └── diagnostic analyzers            // NEW — same pass, same callback
 └── write Parquet files
 ```
+
+Each analyzer registers the topics it cares about. The `analyze()` callback
+dispatches each data message to the relevant collectors *and* the relevant
+analyzers in the same loop iteration. One pass, no waste.
 
 ### The Analyzer Trait
 
@@ -90,7 +103,7 @@ pub struct DiagnosticsResult {
 /// Trait that all diagnostic analyzers implement.
 pub trait Analyzer {
     /// Which ULog topics this analyzer needs.
-    /// The runner will only subscribe to topics required by active analyzers.
+    /// The analyze() callback will only dispatch messages for these topics.
     fn required_topics(&self) -> &[&str];
 
     /// Called once per data message for a subscribed topic.
@@ -109,33 +122,37 @@ pub trait Analyzer {
 }
 ```
 
-### The Runner
+### Integration into analyze()
+
+The existing `analyze()` function builds its collectors (flight modes, stats,
+battery, GPS, vibration, field stats) and runs a single streaming pass.
+Diagnostic analyzers plug into this same pass:
 
 ```rust
-/// Run all registered analyzers over the ULog file in a single streaming pass.
-pub fn run_diagnostics(
+pub fn analyze(
     path: &str,
     metadata: &FlightMetadata,
-    analysis: &FlightAnalysis,
-) -> Result<DiagnosticsResult, std::io::Error> {
-    // Build the set of analyzers
+) -> Result<FlightAnalysis, std::io::Error> {
+    // ... existing collector setup ...
+
+    // Build diagnostic analyzers
     let mut analyzers: Vec<Box<dyn Analyzer>> = vec![
         Box::new(MotorFailureAnalyzer::new(metadata)),
         Box::new(GpsInterferenceAnalyzer::new(metadata)),
-        Box::new(VibrationAnomalyAnalyzer::new(metadata, analysis)),
         // Contributors add new analyzers here
     ];
 
-    // Collect required topics across all analyzers
-    let required: HashSet<&str> = analyzers
+    let diagnostic_topics: HashSet<&str> = analyzers
         .iter()
         .flat_map(|a| a.required_topics())
         .collect();
 
-    // Single streaming pass — dispatch messages to relevant analyzers
     read_file_with_simple_callback(path, |msg| {
         if let Message::Data { topic, timestamp_us, data, fields, .. } = &msg {
-            if required.contains(topic.as_str()) {
+            // ... existing collector dispatch (unchanged) ...
+
+            // Dispatch to diagnostic analyzers
+            if diagnostic_topics.contains(topic.as_str()) {
                 for analyzer in &mut analyzers {
                     if analyzer.required_topics().contains(&topic.as_str()) {
                         analyzer.on_message(topic, *timestamp_us, data, fields);
@@ -146,13 +163,16 @@ pub fn run_diagnostics(
         SimpleCallbackResult::Continue
     })?;
 
-    // Collect results
-    let diagnostics = analyzers
+    // Collect diagnostics alongside existing results
+    let diagnostics: Vec<Diagnostic> = analyzers
         .into_iter()
         .flat_map(|a| a.finish())
         .collect();
 
-    Ok(DiagnosticsResult { diagnostics })
+    Ok(FlightAnalysis {
+        // ... existing fields ...
+        diagnostics,
+    })
 }
 ```
 
@@ -202,6 +222,58 @@ impl Analyzer for MotorFailureAnalyzer {
     }
 }
 ```
+
+## Implementation Order: CLI First, Server Second
+
+All diagnostic work follows this sequence:
+
+1. **CLI (`ulog_convert`)** — Implement and validate the analyzer against local
+   ULog fixtures. The CLI is the development and testing surface. Run it against
+   known-bad logs, inspect the output, iterate.
+
+2. **Tests** — Unit tests against fixture files in `tests/fixtures/`. Each
+   analyzer must include at least one known-good log (no false positives) and
+   one known-bad log (detection fires correctly).
+
+3. **Server** — The server calls the same `analyze()` function. Once the CLI
+   output is correct the server gets it for free. No server-specific diagnostic
+   code.
+
+```
+# Development workflow
+$ cargo run --bin ulog_convert -- input.ulg --output-dir ./out
+# inspect ./out/metadata.json → diagnostics array
+
+# NOT this:
+$ curl -F file=@input.ulg http://localhost:8080/api/upload
+# ^ this is for validation, not development
+```
+
+## Performance Budget
+
+Every analyzer adds work to the `analyze()` streaming pass. To prevent
+regressions:
+
+### Benchmark Gate
+
+A conversion benchmark (`benches/convert.rs`) measures end-to-end
+`convert_ulog()` time against a reference ULog fixture. CI enforces:
+
+- **Threshold:** PRs that regress conversion time by more than **10%** vs the
+  baseline are blocked.
+- **Measurement:** `cargo bench` using `criterion`, run on CI with a pinned
+  fixture file.
+- **Per-analyzer overhead:** Each analyzer should add no more than **5%** to
+  the total `analyze()` pass time. If it does, it needs optimization or must
+  justify the cost in the PR description.
+
+### What This Means for Contributors
+
+- Keep analyzer logic O(n) in message count. No quadratic scans, no
+  unbounded buffers.
+- Sliding windows should have a fixed max size.
+- If an analyzer needs heavy computation (e.g., FFT for vibration frequency
+  analysis), document the expected overhead and benchmark it.
 
 ## Storage & API
 
@@ -264,13 +336,16 @@ GET /api/logs?diagnostic_severity=critical
 
 1. Create `crates/converter/src/diagnostics/your_analyzer.rs`
 2. Implement the `Analyzer` trait
-3. Register it in `run_diagnostics()` in `mod.rs`
-4. Add tests against known-bad ULog fixtures in `tests/fixtures/`
-5. Open a PR
+3. Register it in the analyzer list inside `analyze()`
+4. Add test fixtures: at least one known-good and one known-bad ULog in
+   `tests/fixtures/`
+5. Run `cargo bench` and include the results in your PR description
+6. Test via the CLI first: `cargo run --bin ulog_convert -- bad_log.ulg -o ./out`
+7. Open a PR
 
 Each analyzer is self-contained: it declares its topic dependencies, processes
-messages, and emits `Diagnostic` values. No changes to the upload handler, storage
-layer, or database schema are needed to add a new analyzer.
+messages, and emits `Diagnostic` values. No changes to the upload handler,
+storage layer, or database schema are needed to add a new analyzer.
 
 ## What's In Scope for Contributors
 
@@ -292,7 +367,26 @@ detection) are welcome but require additional review:
 - Must use Rust-native libraries (`linfa`, `smartcore`, or custom implementations)
 - Must document false-positive rates against a test corpus
 - Must be clearly labeled as "experimental" in their output severity
-- Pre-trained models must be vendored as serialized artifacts, not trained at upload time
+- Pre-trained models must be vendored as serialized artifacts, not trained at
+  upload time
+
+#### Pre-trained Model Licensing Requirements
+
+Any vendored model artifact (serialized weights, decision trees, etc.) must meet
+all of the following before it can be merged:
+
+- **License compatibility:** The model and its artifacts must be released under
+  a license compatible with this project (Apache-2.0 or MIT). No GPL, no
+  "non-commercial", no "research only" restrictions.
+- **Training data provenance:** The PR must document what data was used to train
+  the model, where that data came from, and under what license that data was
+  collected. Models trained on proprietary or non-redistributable flight logs
+  will not be accepted.
+- **Reproducibility:** The PR must include or reference scripts that can
+  regenerate the model artifact from publicly available data. "Trust me, I
+  trained it" is not sufficient.
+- **Size budget:** Model artifacts must be under **1 MB** uncompressed. Larger
+  models need explicit maintainer approval and a justification for the size.
 
 ## What's NOT In Scope
 
