@@ -50,6 +50,10 @@ enum Command {
         #[arg(long)]
         diagnostics_only: bool,
 
+        /// Run only specific analyzer(s), comma-separated
+        #[arg(long, short, value_delimiter = ',')]
+        analyzer: Vec<String>,
+
         /// Number of parallel workers (default: num CPUs)
         #[arg(long, short)]
         jobs: Option<usize>,
@@ -86,10 +90,18 @@ fn main() {
         Some(Command::Scan {
             path,
             diagnostics_only,
+            analyzer,
             jobs,
             output_format,
         }) => {
-            run_scan(&path, diagnostics_only, jobs, &output_format);
+            // Validate analyzer IDs upfront
+            if !analyzer.is_empty() {
+                if let Err(e) = flight_review::diagnostics::create_analyzers_filtered(&analyzer) {
+                    eprintln!("error: {}", e);
+                    std::process::exit(1);
+                }
+            }
+            run_scan(&path, diagnostics_only, &analyzer, jobs, &output_format);
             return;
         }
         None => {}
@@ -230,7 +242,7 @@ struct ScanResult {
     error: Option<String>,
 }
 
-fn run_scan(dir: &str, diagnostics_only: bool, jobs: Option<usize>, format: &OutputFormat) {
+fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs: Option<usize>, format: &OutputFormat) {
     // Collect all .ulg files
     let files: Vec<String> = walkdir::WalkDir::new(dir)
         .into_iter()
@@ -265,7 +277,7 @@ fn run_scan(dir: &str, diagnostics_only: bool, jobs: Option<usize>, format: &Out
     let results: Vec<ScanResult> = files
         .par_iter()
         .filter_map(|file| {
-            let result = scan_one_file(file);
+            let result = scan_one_file(file, analyzer_filter);
             let n = processed.fetch_add(1, Ordering::Relaxed) + 1;
 
             if result.error.is_some() {
@@ -303,7 +315,7 @@ fn run_scan(dir: &str, diagnostics_only: bool, jobs: Option<usize>, format: &Out
     eprintln!("\nSummary: {total} files scanned, {diag_count} with diagnostics, {err_count} errors");
 }
 
-fn scan_one_file(path: &str) -> ScanResult {
+fn scan_one_file(path: &str, analyzer_filter: &[String]) -> ScanResult {
     let metadata = match flight_review::metadata::extract_metadata(path) {
         Ok(m) => m,
         Err(e) => {
@@ -332,9 +344,19 @@ fn scan_one_file(path: &str) -> ScanResult {
         }
     };
 
+    let diagnostics = if analyzer_filter.is_empty() {
+        analysis.diagnostics
+    } else {
+        analysis
+            .diagnostics
+            .into_iter()
+            .filter(|d| analyzer_filter.iter().any(|id| id == &d.id))
+            .collect()
+    };
+
     ScanResult {
         file: path.to_string(),
-        diagnostics: analysis.diagnostics,
+        diagnostics,
         vehicle: metadata.sys_name.clone(),
         hardware: metadata.ver_hw.clone(),
         duration_s: metadata.flight_duration_s,

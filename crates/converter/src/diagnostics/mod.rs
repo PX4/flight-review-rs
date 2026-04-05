@@ -139,3 +139,27 @@ pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(rc_loss::RcLossAnalyzer::new()),
     ]
 }
+
+/// Create only the analyzers whose IDs are in the given list.
+/// Returns an error string if any ID is unrecognized.
+pub fn create_analyzers_filtered(ids: &[String]) -> Result<Vec<Box<dyn Analyzer>>, String> {
+    let all = create_analyzers();
+    let mut selected = Vec::new();
+    for id in ids {
+        let found = all.iter().any(|a| a.id() == id.as_str());
+        if !found {
+            let valid: Vec<&str> = all.iter().map(|a| a.id()).collect();
+            return Err(format!(
+                "unknown analyzer '{}'. valid: {}",
+                id,
+                valid.join(", ")
+            ));
+        }
+    }
+    for a in all {
+        if ids.iter().any(|id| id == a.id()) {
+            selected.push(a);
+        }
+    }
+    Ok(selected)
+}
