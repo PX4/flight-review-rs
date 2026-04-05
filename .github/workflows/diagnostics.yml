@@ -73,6 +73,14 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ runner.os }}-${{ hashFiles('crates/converter/src/**', 'crates/converter/benches/**') }}
+          restore-keys: |
+            criterion-${{ runner.os }}-
+
       - name: Run conversion benchmark
         run: |
           set -o pipefail
