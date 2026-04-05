@@ -98,7 +98,16 @@ Key technologies:
 
 ### CLI Tool (`ulog-convert`)
 
-`ulog-convert` is a standalone command-line tool for converting ULog files without running the server. It performs the same conversion, metadata extraction, analysis, and diagnostics as the server upload path but writes results to local files or stdout. Includes a `scan` subcommand for batch processing directories of ULog files with parallel analysis. No database dependencies -- purely file-based.
+`ulog-convert` is a standalone command-line tool for converting, diagnosing, and analyzing PX4 ULog files. No server, no database -- purely file-based. Designed for both individual file processing and batch workflows over entire flight log datasets.
+
+Key capabilities:
+
+- **Convert** ULog to per-topic Parquet files with metadata
+- **Diagnose** flight anomalies (motor failure, GPS interference, battery brownout, EKF failure, RC loss)
+- **Analyze** signal processing (PID step response via Wiener deconvolution)
+- **Batch process** directories of ULog files with parallel execution via rayon
+
+Every conversion produces a `manifest.json` that maps the output (source file, topics to Parquet paths, diagnostic results). Batch conversions additionally produce an `index.json` at the output root that indexes all converted logs.
 
 ### Two Paths
 
@@ -133,7 +142,8 @@ flight-review-rs/
 │   │   │   ├── metadata.rs     # All 13 ULog message types --> metadata.json
 │   │   │   ├── analysis.rs     # Flight modes, stats, battery, GPS, vibration, param diff
 │   │   │   ├── diagnostics/    # Diagnostic analyzers (motor, GPS, battery, EKF, RC)
-│   │   │   ├── pid_analysis.rs # Wiener deconvolution step response (roll/pitch/yaw)
+│   │   │   ├── signal_processing/ # Signal processing framework (PID step response, DSP)
+│   │   │   ├── pid_analysis.rs # Backward-compat facade for signal_processing
 │   │   │   └── bin/
 │   │   │       └── ulog_convert.rs
 │   │   ├── benches/            # Criterion benchmarks
@@ -432,32 +442,60 @@ Import database records, then pre-convert all logs in the background. Useful for
 `ulog-convert` is a standalone command-line tool for converting PX4 ULog files to Parquet and JSON. It can extract metadata, run flight analysis and diagnostics, perform PID step response analysis, and batch-scan directories for anomalies -- all without running the server or touching a database.
 
 ```bash
-# Full conversion (Parquet + metadata.json)
+# Single file conversion (produces Parquet + metadata.json + manifest.json)
 ulog-convert flight.ulg output_dir/
 
 # Metadata + diagnostics only (JSON to stdout)
 ulog-convert --metadata-only flight.ulg
 
-# PID step response analysis
-ulog-convert --pid-analysis flight.ulg
-
 # Compact JSON (for scripting)
 ulog-convert --metadata-only --output-format compact flight.ulg | jq .
 
-# List available diagnostic analyzers
-ulog-convert list-analyzers
+# Signal processing analysis
+ulog-convert analyze flight.ulg
+ulog-convert analyze flight.ulg -m pid_step_response
 
-# Batch scan a directory for anomalies (parallel, table output)
-ulog-convert scan data/files/ --diagnostics-only
+# Batch: convert a directory to Parquet (parallel, produces index.json)
+ulog-convert batch logs/ -o dataset/
 
-# Scan with JSON output for scripting
-ulog-convert scan data/files/ --diagnostics-only --output-format json
+# Batch: scan for anomalies
+ulog-convert batch logs/ --diagnostics-only
 
-# Scan with specific analyzer(s) only
-ulog-convert scan data/files/ -a gps_interference,ekf_failure
+# Batch: convert + diagnose + analyze
+ulog-convert batch logs/ -o dataset/ --diagnostics --analyze
 
-# Version
-ulog-convert --version
+# Batch: filter to specific analyzers
+ulog-convert batch logs/ --diagnostics-only --analyzer gps_interference,ekf_failure
+
+# JSON output for scripting
+ulog-convert batch logs/ --diagnostics-only --format json
+```
+
+### Conversion Output
+
+Every conversion produces a self-describing output directory:
+
+```
+output/
+├── manifest.json              # what's here: source, topics, file map, diagnostics
+├── metadata.json              # full flight metadata and analysis
+├── vehicle_attitude.parquet   # one Parquet file per ULog topic
+├── sensor_combined.parquet
+└── ...
+```
+
+Batch conversions add an `index.json` at the output root:
+
+```
+dataset/
+├── index.json                 # indexes all logs with manifest paths
+├── sample/
+│   ├── manifest.json
+│   ├── metadata.json
+│   └── *.parquet
+├── motor_failure/
+│   ├── manifest.json
+│   └── ...
 ```
 
 ## Upload Context Fields
@@ -521,6 +559,77 @@ curl "http://localhost:8080/api/logs?diagnostic_severity=critical"
 7. Run `cargo bench` and include results in the PR
 
 CI (`diagnostics.yml`) validates all of this automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
+
+## For Researchers
+
+There are two paths for working with flight log data, depending on your tools and workflow.
+
+### Path 1: Parquet export for Python / ML workflows
+
+Convert ULog files to Parquet and work with them using your existing tools (polars, pandas, DuckDB, scikit-learn, PyTorch). The CLI handles all the ULog parsing and produces a self-describing dataset.
+
+```bash
+# Convert a directory of flight logs to Parquet
+ulog-convert batch logs/ -o dataset/ --diagnostics
+
+# Output structure:
+# dataset/
+# ├── index.json              ← entry point: lists all logs
+# ├── log_001/
+# │   ├── manifest.json       ← file map + diagnostic labels
+# │   ├── metadata.json       ← full flight metadata
+# │   ├── vehicle_attitude.parquet
+# │   ├── sensor_combined.parquet
+# │   └── ...
+# └── log_002/
+#     └── ...
+```
+
+From Python:
+
+```python
+import json, polars as pl
+
+# Load the dataset index
+with open("dataset/index.json") as f:
+    index = json.load(f)
+
+# Find logs with motor failures
+crashes = [log for log in index["logs"] if log["diagnostic_count"] > 0]
+
+# Load a specific topic as a dataframe
+df = pl.read_parquet(f"dataset/{crashes[0]['path']}/vehicle_attitude.parquet")
+```
+
+The diagnostic labels in each `manifest.json` provide pre-computed anomaly annotations with timestamps and severity -- usable as training labels for supervised learning without manually reviewing flights.
+
+### Path 2: Rust-native signal processing modules
+
+For analyses that need to run at scale across thousands of logs, or that you want to contribute back to the tool, write a Rust module that plugs into the signal processing framework. You declare what signals you need, the framework extracts them from the ULog file, and you receive buffered time-series data ready for FFT, spectral analysis, or deconvolution.
+
+```bash
+# Run signal processing on a single file
+ulog-convert analyze flight.ulg
+
+# Batch across a directory (parallel)
+ulog-convert batch logs/ --analyze -m pid_step_response
+```
+
+#### Available Modules
+
+| Module | Description | Topics |
+|--------|-------------|--------|
+| `pid_step_response` | PID controller step response via Wiener deconvolution | `vehicle_rates_setpoint`, `vehicle_angular_velocity` |
+
+#### Adding a New Module
+
+1. Create `crates/converter/src/signal_processing/your_module.rs`
+2. Implement the `SignalAnalysis` trait (`id`, `description`, `required_signals`, `analyze`)
+3. Register in `create_analyses()` in `signal_processing/mod.rs`
+4. Use shared DSP utilities from `signal_processing/dsp.rs` (resampling, windowing, sample rate estimation)
+5. Add tests following the pattern in `signal_processing/testing.rs`
+
+Shared DSP functions available in `dsp.rs`: `median_sample_rate`, `resample_uniform`, `hanning_window`.
 
 ## Roadmap
 
