@@ -72,6 +72,24 @@ enum Command {
         #[arg(long, value_enum, default_value_t = ScanFormat::Table)]
         output_format: ScanFormat,
     },
+
+    /// Run signal processing analyses on a ULog file
+    Analyze {
+        /// Input ULog file (required unless --list)
+        file: Option<String>,
+
+        /// Run only specific module(s), comma-separated
+        #[arg(long, short, value_delimiter = ',')]
+        modules: Vec<String>,
+
+        /// List available analysis modules
+        #[arg(long)]
+        list: bool,
+
+        /// Output format
+        #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
+        output_format: OutputFormat,
+    },
 }
 
 fn serialize_metadata(
@@ -95,6 +113,65 @@ fn main() {
                 println!("{:<20} topics: {}", "", a.required_topics().join(", "));
                 println!();
             }
+            return;
+        }
+        Some(Command::Analyze {
+            file,
+            modules,
+            list,
+            output_format,
+        }) => {
+            if list {
+                let analyses = flight_review::signal_processing::create_analyses();
+                for a in &analyses {
+                    println!("{:<24} {}", a.id(), a.description());
+                    let signals = a.required_signals();
+                    let topics: Vec<String> = {
+                        let mut t: Vec<&str> = signals.iter().map(|s| s.topic.as_str()).collect();
+                        t.sort();
+                        t.dedup();
+                        t.into_iter().map(String::from).collect()
+                    };
+                    println!("{:<24} topics: {}", "", topics.join(", "));
+                    println!();
+                }
+                return;
+            }
+
+            let file = match file {
+                Some(f) => f,
+                None => {
+                    eprintln!("error: <FILE> is required when not using --list");
+                    std::process::exit(1);
+                }
+            };
+
+            let analyses = if modules.is_empty() {
+                flight_review::signal_processing::create_analyses()
+            } else {
+                match flight_review::signal_processing::create_analyses_filtered(&modules) {
+                    Ok(a) => a,
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            };
+
+            let results =
+                match flight_review::signal_processing::run_analyses(&file, &analyses) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("error: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+
+            let json = match output_format {
+                OutputFormat::Pretty => serde_json::to_string_pretty(&results).unwrap(),
+                OutputFormat::Compact => serde_json::to_string(&results).unwrap(),
+            };
+            println!("{}", json);
             return;
         }
         Some(Command::Scan {
