@@ -115,6 +115,20 @@ CREATE TABLE IF NOT EXISTS log_field_stats (
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field ON log_field_stats(topic, field);
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_max ON log_field_stats(topic, field, max_val);
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_min ON log_field_stats(topic, field, min_val);
+
+CREATE TABLE IF NOT EXISTS log_diagnostics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    log_id TEXT NOT NULL,
+    diagnostic_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    timestamp_us INTEGER,
+    end_timestamp_us INTEGER,
+    evidence TEXT,
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_diagnostics_log ON log_diagnostics(log_id);
+CREATE INDEX IF NOT EXISTS idx_log_diagnostics_severity ON log_diagnostics(severity);
 "#;
 
 #[cfg(feature = "sqlite")]
@@ -130,6 +144,8 @@ const ALTER_COLUMNS: &[&str] = &[
     "ALTER TABLE logs ADD COLUMN total_distance_m REAL",
     "ALTER TABLE logs ADD COLUMN error_count INTEGER",
     "ALTER TABLE logs ADD COLUMN warning_count INTEGER",
+    "ALTER TABLE logs ADD COLUMN analysis_version INTEGER DEFAULT 0",
+    "ALTER TABLE logs ADD COLUMN diagnostic_flags TEXT",
 ];
 
 #[cfg(feature = "sqlite")]
@@ -248,6 +264,8 @@ fn row_to_record(row: &sqlx::sqlite::SqliteRow) -> Result<LogRecord, sqlx::Error
         total_distance_m: row.try_get("total_distance_m")?,
         error_count: row.try_get("error_count")?,
         warning_count: row.try_get("warning_count")?,
+        analysis_version: row.try_get("analysis_version")?,
+        diagnostic_flags: row.try_get("diagnostic_flags")?,
     })
 }
 
@@ -424,6 +442,19 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
         bind_values.push(max_lon.to_string());
     }
 
+    if let Some(ref diag) = filters.diagnostic {
+        conditions.push("diagnostic_flags LIKE ?".to_string());
+        bind_values.push(format!("%{diag}%"));
+    }
+
+    if let Some(ref sev) = filters.diagnostic_severity {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM log_diagnostics WHERE log_id = logs.id AND severity = ?)"
+                .to_string(),
+        );
+        bind_values.push(sev.clone());
+    }
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {
@@ -447,9 +478,9 @@ impl LogStore for SqliteStore {
              vehicle_name, tags, location_name, mission_type, \
              sys_uuid, ver_sw, vehicle_type, localization_sources, vibration_status, \
              battery_min_voltage, gps_max_eph, max_speed_m_s, total_distance_m, \
-             error_count, warning_count) \
+             error_count, warning_count, analysis_version, diagnostic_flags) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, \
-             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&id)
         .bind(&record.filename)
@@ -486,6 +517,8 @@ impl LogStore for SqliteStore {
         .bind(record.total_distance_m)
         .bind(record.error_count)
         .bind(record.warning_count)
+        .bind(record.analysis_version)
+        .bind(&record.diagnostic_flags)
         .execute(&self.pool)
         .await?;
 
@@ -617,7 +650,8 @@ impl LogStore for SqliteStore {
              tags = ?, location_name = ?, mission_type = ?, \
              sys_uuid = ?, ver_sw = ?, vehicle_type = ?, localization_sources = ?, \
              vibration_status = ?, battery_min_voltage = ?, gps_max_eph = ?, \
-             max_speed_m_s = ?, total_distance_m = ?, error_count = ?, warning_count = ? \
+             max_speed_m_s = ?, total_distance_m = ?, error_count = ?, warning_count = ?, \
+             analysis_version = ?, diagnostic_flags = ? \
              WHERE id = ?",
         )
         .bind(&record.filename)
@@ -654,6 +688,8 @@ impl LogStore for SqliteStore {
         .bind(record.total_distance_m)
         .bind(record.error_count)
         .bind(record.warning_count)
+        .bind(record.analysis_version)
+        .bind(&record.diagnostic_flags)
         .bind(&id_str)
         .execute(&self.pool)
         .await?;
@@ -810,6 +846,26 @@ impl LogStore for SqliteStore {
         Ok(())
     }
 
+    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
+        let id_str = log_id.to_string();
+        for d in diagnostics {
+            sqlx::query(
+                "INSERT INTO log_diagnostics (log_id, diagnostic_id, severity, summary, timestamp_us, end_timestamp_us, evidence) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+                .bind(&id_str)
+                .bind(&d.diagnostic_id)
+                .bind(&d.severity)
+                .bind(&d.summary)
+                .bind(d.timestamp_us)
+                .bind(d.end_timestamp_us)
+                .bind(&d.evidence)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         sqlx::query("DELETE FROM log_parameters WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
@@ -817,6 +873,7 @@ impl LogStore for SqliteStore {
         sqlx::query("DELETE FROM log_tags WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_errors WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_field_stats WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
         Ok(())
     }
 }
@@ -888,6 +945,12 @@ impl super::LogStore for SqliteStore {
     }
 
     async fn insert_field_stats(&self, _log_id: uuid::Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), super::DbError> {
+        Err(super::DbError::Sqlx(sqlx::Error::Configuration(
+            "sqlite feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_diagnostics(&self, _log_id: uuid::Uuid, _diagnostics: &[super::DiagnosticRecord]) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))

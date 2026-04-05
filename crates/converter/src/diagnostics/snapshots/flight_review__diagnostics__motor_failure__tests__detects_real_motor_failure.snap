@@ -1,0 +1,91 @@
+---
+source: crates/converter/src/diagnostics/motor_failure.rs
+assertion_line: 391
+expression: diags
+---
+[
+  {
+    "id": "motor_failure",
+    "summary": "Motor 0 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 0,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  },
+  {
+    "id": "motor_failure",
+    "summary": "Motor 1 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 1,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  },
+  {
+    "id": "motor_failure",
+    "summary": "Motor 2 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 2,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  },
+  {
+    "id": "motor_failure",
+    "summary": "Motor 3 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 3,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  },
+  {
+    "id": "motor_failure",
+    "summary": "Motor 4 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 4,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  },
+  {
+    "id": "motor_failure",
+    "summary": "Motor 5 output dropped to 0 PWM at 5081.8s while armed in Mission mode",
+    "severity": "critical",
+    "timestamp_us": 5081817622,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "MotorFailure",
+      "motor_index": 5,
+      "pwm_value": 0.0,
+      "failure_mode": "drop_to_zero",
+      "flight_mode": "Mission"
+    }
+  }
+]

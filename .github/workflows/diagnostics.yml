@@ -1,0 +1,90 @@
+name: Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/tests/fixtures/**'
+      - 'crates/converter/benches/**'
+      - 'scripts/ci/check-analyzer.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/tests/fixtures/**'
+      - 'crates/converter/benches/**'
+      - 'scripts/ci/check-analyzer.sh'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  validate:
+    name: Validate analyzers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # needed for git diff against main
+
+      - name: Check analyzer requirements
+        run: scripts/ci/check-analyzer.sh --changed-only
+
+  test:
+    name: Diagnostic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: rustup show  # installs version from rust-toolchain.toml
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run diagnostic tests
+        run: cargo test -p flight-review --lib diagnostics -- --nocapture
+
+      - name: No false positives on sample.ulg
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- no_false_positives --nocapture
+
+      - name: Real-world fixture tests
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- detects_real --nocapture
+
+      - name: Snapshot tests up to date
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- snapshot 2>&1 || {
+            echo "Snapshot tests failed. Run 'cargo insta review' locally."
+            exit 1
+          }
+
+  benchmark:
+    name: Performance benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: rustup show  # installs version from rust-toolchain.toml
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Restore benchmark baseline
+        uses: actions/cache@v4
+        with:
+          path: target/criterion
+          key: criterion-${{ runner.os }}-${{ hashFiles('crates/converter/src/**', 'crates/converter/benches/**') }}
+          restore-keys: |
+            criterion-${{ runner.os }}-
+
+      - name: Run conversion benchmark
+        run: |
+          set -o pipefail
+          cargo bench -p flight-review --bench convert 2>&1 | tee bench-output.txt
+
+      - name: Check performance budget
+        run: scripts/ci/check-bench-budget.sh bench-output.txt

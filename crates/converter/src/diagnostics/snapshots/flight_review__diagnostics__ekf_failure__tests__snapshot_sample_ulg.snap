@@ -1,0 +1,6 @@
+---
+source: crates/converter/src/diagnostics/ekf_failure.rs
+assertion_line: 254
+expression: diags
+---
+[]

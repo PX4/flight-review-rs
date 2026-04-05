@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS log_field_stats (
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field ON log_field_stats(topic, field);
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_max ON log_field_stats(topic, field, max_val);
 CREATE INDEX IF NOT EXISTS idx_field_stats_topic_field_min ON log_field_stats(topic, field, min_val);
+
+CREATE TABLE IF NOT EXISTS log_diagnostics (
+    id SERIAL PRIMARY KEY,
+    log_id UUID NOT NULL,
+    diagnostic_id TEXT NOT NULL,
+    severity TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    timestamp_us BIGINT,
+    end_timestamp_us BIGINT,
+    evidence TEXT,
+    FOREIGN KEY (log_id) REFERENCES logs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_log_diagnostics_log ON log_diagnostics(log_id);
+CREATE INDEX IF NOT EXISTS idx_log_diagnostics_severity ON log_diagnostics(severity);
 "#;
 
 #[cfg(feature = "postgres")]
@@ -125,6 +139,8 @@ const ALTER_COLUMNS: &[&str] = &[
     "ALTER TABLE logs ADD COLUMN IF NOT EXISTS total_distance_m DOUBLE PRECISION",
     "ALTER TABLE logs ADD COLUMN IF NOT EXISTS error_count INTEGER",
     "ALTER TABLE logs ADD COLUMN IF NOT EXISTS warning_count INTEGER",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS analysis_version INTEGER DEFAULT 0",
+    "ALTER TABLE logs ADD COLUMN IF NOT EXISTS diagnostic_flags TEXT",
 ];
 
 #[cfg(feature = "postgres")]
@@ -218,6 +234,8 @@ fn row_to_record(row: &sqlx::postgres::PgRow) -> Result<LogRecord, sqlx::Error> 
         total_distance_m: row.try_get("total_distance_m")?,
         error_count: row.try_get("error_count")?,
         warning_count: row.try_get("warning_count")?,
+        analysis_version: row.try_get("analysis_version")?,
+        diagnostic_flags: row.try_get("diagnostic_flags")?,
     })
 }
 
@@ -442,6 +460,20 @@ fn build_where_postgres(filters: &ListFilters) -> (String, Vec<String>, usize) {
         param_idx += 3;
     }
 
+    if let Some(ref diag) = filters.diagnostic {
+        conditions.push(format!("diagnostic_flags ILIKE ${param_idx}"));
+        bind_values.push(format!("%{diag}%"));
+        param_idx += 1;
+    }
+
+    if let Some(ref sev) = filters.diagnostic_severity {
+        conditions.push(format!(
+            "EXISTS (SELECT 1 FROM log_diagnostics WHERE log_id = logs.id AND severity = ${param_idx})"
+        ));
+        bind_values.push(sev.clone());
+        param_idx += 1;
+    }
+
     let where_clause = if conditions.is_empty() {
         String::new()
     } else {
@@ -462,10 +494,10 @@ impl LogStore for PostgresStore {
              vehicle_name, tags, location_name, mission_type, \
              sys_uuid, ver_sw, vehicle_type, localization_sources, vibration_status, \
              battery_min_voltage, gps_max_eph, max_speed_m_s, total_distance_m, \
-             error_count, warning_count) \
+             error_count, warning_count, analysis_version, diagnostic_flags) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
              $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, \
-             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)",
+             $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37)",
         )
         .bind(record.id)
         .bind(&record.filename)
@@ -502,6 +534,8 @@ impl LogStore for PostgresStore {
         .bind(record.total_distance_m)
         .bind(record.error_count)
         .bind(record.warning_count)
+        .bind(record.analysis_version)
+        .bind(&record.diagnostic_flags)
         .execute(&self.pool)
         .await?;
 
@@ -629,8 +663,9 @@ impl LogStore for PostgresStore {
              tags = $21, location_name = $22, mission_type = $23, \
              sys_uuid = $24, ver_sw = $25, vehicle_type = $26, localization_sources = $27, \
              vibration_status = $28, battery_min_voltage = $29, gps_max_eph = $30, \
-             max_speed_m_s = $31, total_distance_m = $32, error_count = $33, warning_count = $34 \
-             WHERE id = $35",
+             max_speed_m_s = $31, total_distance_m = $32, error_count = $33, warning_count = $34, \
+             analysis_version = $35, diagnostic_flags = $36 \
+             WHERE id = $37",
         )
         .bind(&record.filename)
         .bind(record.created_at)
@@ -666,6 +701,8 @@ impl LogStore for PostgresStore {
         .bind(record.total_distance_m)
         .bind(record.error_count)
         .bind(record.warning_count)
+        .bind(record.analysis_version)
+        .bind(&record.diagnostic_flags)
         .bind(id)
         .execute(&self.pool)
         .await?;
@@ -843,12 +880,32 @@ impl LogStore for PostgresStore {
         Ok(())
     }
 
+    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
+        for d in diagnostics {
+            sqlx::query(
+                "INSERT INTO log_diagnostics (log_id, diagnostic_id, severity, summary, timestamp_us, end_timestamp_us, evidence) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)"
+            )
+                .bind(log_id)
+                .bind(&d.diagnostic_id)
+                .bind(&d.severity)
+                .bind(&d.summary)
+                .bind(d.timestamp_us)
+                .bind(d.end_timestamp_us)
+                .bind(&d.evidence)
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
         sqlx::query("DELETE FROM log_parameters WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_topics WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_tags WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_errors WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM log_field_stats WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
         Ok(())
     }
 }
@@ -917,6 +974,12 @@ impl LogStore for PostgresStore {
     }
 
     async fn insert_field_stats(&self, _log_id: Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+        Err(DbError::Sqlx(sqlx::Error::Configuration(
+            "postgres feature is not enabled".into(),
+        )))
+    }
+
+    async fn insert_diagnostics(&self, _log_id: Uuid, _diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))

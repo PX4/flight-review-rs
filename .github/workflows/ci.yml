@@ -15,9 +15,9 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup show  # installs version from rust-toolchain.toml
 
       - uses: Swatinem/rust-cache@v2
 
@@ -40,9 +40,9 @@ jobs:
     name: Integration Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup show  # installs version from rust-toolchain.toml
 
       - uses: Swatinem/rust-cache@v2
 

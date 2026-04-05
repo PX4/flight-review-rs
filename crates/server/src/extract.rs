@@ -19,6 +19,7 @@ pub struct SearchFields {
     pub total_distance_m: Option<f64>,
     pub error_count: Option<i32>,
     pub warning_count: Option<i32>,
+    pub diagnostic_flags: Option<String>,
 }
 
 /// Derive all 11 search column values from a [`FlightMetadata`] struct.
@@ -35,7 +36,22 @@ pub fn extract_search_fields(metadata: &FlightMetadata) -> SearchFields {
         total_distance_m: extract_total_distance(metadata),
         error_count: Some(count_errors(metadata)),
         warning_count: Some(count_warnings(metadata)),
+        diagnostic_flags: extract_diagnostic_flags(metadata),
     }
+}
+
+/// Extract comma-separated diagnostic IDs from analysis results.
+fn extract_diagnostic_flags(metadata: &FlightMetadata) -> Option<String> {
+    metadata.analysis.as_ref().and_then(|a| {
+        if a.diagnostics.is_empty() {
+            None
+        } else {
+            let mut ids: Vec<&str> = a.diagnostics.iter().map(|d| d.id.as_str()).collect();
+            ids.sort();
+            ids.dedup();
+            Some(ids.join(","))
+        }
+    })
 }
 
 /// Detect vehicle type from the MAV_TYPE parameter.
