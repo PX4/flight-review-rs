@@ -361,6 +361,8 @@ struct BatchResult {
     file: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     converted: Option<bool>,
+    #[serde(skip)]
+    output_dir: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     diagnostics: Vec<flight_review::diagnostics::Diagnostic>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -373,6 +375,27 @@ struct BatchResult {
     duration_s: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+}
+
+/// Top-level index for batch conversions.
+#[derive(serde::Serialize)]
+struct BatchIndex {
+    version: u32,
+    total: usize,
+    logs: Vec<BatchIndexEntry>,
+}
+
+#[derive(serde::Serialize)]
+struct BatchIndexEntry {
+    path: String,
+    manifest: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vehicle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hardware: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    duration_s: Option<f64>,
+    diagnostic_count: usize,
 }
 
 fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFormat) {
@@ -470,6 +493,37 @@ fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFor
         }
     }
 
+    // Write batch-level index.json if converting
+    if let Some(ref output_dir) = opts.output_dir {
+        let entries: Vec<BatchIndexEntry> = results
+            .iter()
+            .filter(|r| r.converted == Some(true))
+            .filter_map(|r| {
+                let dir_name = r.output_dir.as_ref()?;
+                Some(BatchIndexEntry {
+                    path: dir_name.clone(),
+                    manifest: format!("{dir_name}/manifest.json"),
+                    vehicle: r.vehicle.clone(),
+                    hardware: r.hardware.clone(),
+                    duration_s: r.duration_s,
+                    diagnostic_count: r.diagnostics.len(),
+                })
+            })
+            .collect();
+
+        let index = BatchIndex {
+            version: 1,
+            total: entries.len(),
+            logs: entries,
+        };
+
+        let index_path = Path::new(output_dir).join("index.json");
+        if let Ok(json) = serde_json::to_string_pretty(&index) {
+            let _ = std::fs::write(&index_path, json);
+            eprintln!("Index:  {}", index_path.display());
+        }
+    }
+
     // Summary
     let diag_count = with_diags.load(Ordering::Relaxed);
     let conv_count = converted.load(Ordering::Relaxed);
@@ -492,6 +546,7 @@ fn process_one_file(path: &str, opts: &BatchOpts) -> BatchResult {
             return BatchResult {
                 file: path.to_string(),
                 converted: None,
+                output_dir: None,
                 diagnostics: vec![],
                 analyses: None,
                 vehicle: None,
@@ -508,6 +563,7 @@ fn process_one_file(path: &str, opts: &BatchOpts) -> BatchResult {
 
     // Conversion
     let mut did_convert = None;
+    let mut convert_output_dir = None;
     if opts.convert {
         if let Some(ref output_dir) = opts.output_dir {
             let stem = Path::new(path)
@@ -521,11 +577,13 @@ fn process_one_file(path: &str, opts: &BatchOpts) -> BatchResult {
                     let meta_json = serde_json::to_string_pretty(&result.metadata).unwrap();
                     let _ = std::fs::write(file_output.join("metadata.json"), &meta_json);
                     did_convert = Some(true);
+                    convert_output_dir = Some(stem);
                 }
                 Err(e) => {
                     return BatchResult {
                         file: path.to_string(),
                         converted: Some(false),
+                        output_dir: None,
                         diagnostics: vec![],
                         analyses: None,
                         vehicle,
@@ -577,6 +635,7 @@ fn process_one_file(path: &str, opts: &BatchOpts) -> BatchResult {
     BatchResult {
         file: path.to_string(),
         converted: did_convert,
+        output_dir: convert_output_dir,
         diagnostics,
         analyses,
         vehicle,
