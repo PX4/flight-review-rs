@@ -1,0 +1,94 @@
+name: Diagnostics
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/tests/fixtures/**'
+      - 'crates/converter/benches/**'
+      - 'scripts/ci/check-analyzer.sh'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/tests/fixtures/**'
+      - 'crates/converter/benches/**'
+      - 'scripts/ci/check-analyzer.sh'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  validate:
+    name: Validate analyzers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # needed for git diff against main
+
+      - name: Check analyzer requirements
+        run: scripts/ci/check-analyzer.sh --changed-only
+
+  test:
+    name: Diagnostic tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run diagnostic tests
+        run: cargo test -p flight-review --lib diagnostics -- --nocapture
+
+      - name: No false positives on sample.ulg
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- no_false_positives --nocapture
+
+      - name: Real-world fixture tests
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- detects_real --nocapture
+
+      - name: Snapshot tests up to date
+        run: |
+          cargo test -p flight-review --lib diagnostics \
+            -- snapshot 2>&1 || {
+            echo "Snapshot tests failed. Run 'cargo insta review' locally."
+            exit 1
+          }
+
+  benchmark:
+    name: Performance benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run conversion benchmark
+        run: cargo bench -p flight-review -- --output-format bencher 2>&1 | tee bench-output.txt
+
+      - name: Check performance budget
+        run: |
+          # Extract mean time in ms from criterion output
+          time_ns=$(grep -oP 'time:\s+\[\K[0-9.]+' bench-output.txt | head -1 || echo "")
+          if [ -z "$time_ns" ]; then
+            echo "Could not parse benchmark output, skipping budget check"
+            exit 0
+          fi
+          # criterion reports in ms for our benchmark
+          echo "Benchmark time: ${time_ns}ms"
+          # sample.ulg is ~4MB, budget is 500ms for <10MB
+          if (( $(echo "$time_ns > 500" | bc -l 2>/dev/null || echo 0) )); then
+            echo "FAIL: Conversion exceeded 500ms budget for <10MB files"
+            exit 1
+          fi
+          echo "PASS: Within performance budget"

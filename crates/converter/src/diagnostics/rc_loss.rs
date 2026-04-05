@@ -3,6 +3,9 @@
 //! Detects loss of RC (remote control) signal during armed flight.
 //! Tracks the `rc_lost` field from `input_rc` and the armed state from
 //! `vehicle_status`.
+//!
+//! SKIP_FIXTURE: No known ULog in our corpus exhibits RC signal loss.
+//! Add a fixture when one becomes available.
 
 use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
 use px4_ulog::stream_parser::model::DataMessage;
