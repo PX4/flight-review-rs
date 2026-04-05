@@ -964,11 +964,13 @@ dependencies = [
  "insta",
  "parquet",
  "px4-ulog",
+ "rayon",
  "rustfft",
  "serde",
  "serde_json",
  "tempfile",
  "thiserror",
+ "walkdir",
 ]
 
 [[package]]
