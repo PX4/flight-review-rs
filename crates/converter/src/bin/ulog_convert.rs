@@ -48,13 +48,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List available diagnostic analyzers and signal processing modules
-    List,
-
     /// Batch process a directory of ULog files
     ///
     /// Convert, diagnose, and analyze ULog files in parallel.
-    /// By default converts to Parquet + metadata.json.
+    ///
+    /// Diagnostics: motor_failure, gps_interference, battery_brownout,
+    /// ekf_failure, rc_loss
+    ///
+    /// Signal processing: pid_step_response
     Batch {
         /// Directory containing .ulg files (searched recursively)
         path: String,
@@ -93,17 +94,15 @@ enum Command {
     },
 
     /// Run signal processing analyses on a single ULog file
+    ///
+    /// Modules: pid_step_response
     Analyze {
-        /// Input ULog file (required unless --list)
-        file: Option<String>,
+        /// Input ULog file
+        file: String,
 
         /// Run only specific module(s), comma-separated
         #[arg(long, short, value_delimiter = ',')]
         modules: Vec<String>,
-
-        /// List available analysis modules
-        #[arg(long)]
-        list: bool,
 
         /// Output format
         #[arg(long, value_enum, default_value_t = OutputFormat::Pretty)]
@@ -125,52 +124,11 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::List) => {
-            println!("Diagnostic analyzers:");
-            println!();
-            let analyzers = flight_review::diagnostics::create_analyzers();
-            for a in &analyzers {
-                println!("  {:<24} {}", a.id(), a.description());
-            }
-
-            println!();
-            println!("Signal processing modules:");
-            println!();
-            let analyses = flight_review::signal_processing::create_analyses();
-            for a in &analyses {
-                println!("  {:<24} {}", a.id(), a.description());
-            }
-            return;
-        }
         Some(Command::Analyze {
             file,
             modules,
-            list,
             output_format,
         }) => {
-            if list {
-                let analyses = flight_review::signal_processing::create_analyses();
-                for a in &analyses {
-                    println!("{:<24} {}", a.id(), a.description());
-                    let signals = a.required_signals();
-                    let mut topics: Vec<&str> =
-                        signals.iter().map(|s| s.topic.as_str()).collect();
-                    topics.sort();
-                    topics.dedup();
-                    println!("{:<24} topics: {}", "", topics.join(", "));
-                    println!();
-                }
-                return;
-            }
-
-            let file = match file {
-                Some(f) => f,
-                None => {
-                    eprintln!("error: <FILE> is required when not using --list");
-                    std::process::exit(1);
-                }
-            };
-
             let analyses = if modules.is_empty() {
                 flight_review::signal_processing::create_analyses()
             } else {
