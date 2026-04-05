@@ -29,6 +29,9 @@
 - [Migrate from v1](#migrate-from-v1)
 - [CLI](#cli)
 - [Upload Context Fields](#upload-context-fields)
+- [Diagnostics](#diagnostics)
+  - [Available Analyzers](#available-analyzers)
+  - [Adding a New Analyzer](#adding-a-new-analyzer)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -64,6 +67,7 @@ The converter library handles all ULog processing:
 - Per-topic Parquet conversion with ZSTD compression
 - Metadata extraction (all 13 ULog message types)
 - Flight analysis (modes, stats, battery, GPS quality, vibration, param diff, GPS track)
+- Diagnostic analyzers (motor failure, GPS interference, battery brownout, EKF failure, RC loss)
 - PID step response analysis (Wiener deconvolution)
 
 ### Server Crate (`flight-review-server`)
@@ -94,7 +98,7 @@ Key technologies:
 
 ### CLI Tool (`ulog-convert`)
 
-`ulog-convert` is a standalone command-line tool for converting ULog files without running the server. It performs the same conversion, metadata extraction, and analysis as the server upload path but writes results to local files or stdout. Useful for batch processing, scripting, and local analysis.
+`ulog-convert` is a standalone command-line tool for converting ULog files without running the server. It performs the same conversion, metadata extraction, analysis, and diagnostics as the server upload path but writes results to local files or stdout. Includes a `scan` subcommand for batch processing directories of ULog files with parallel analysis. No database dependencies -- purely file-based.
 
 ### Two Paths
 
@@ -128,9 +132,12 @@ flight-review-rs/
 │   │   │   ├── converter.rs    # ULog --> per-topic ZSTD Parquet files
 │   │   │   ├── metadata.rs     # All 13 ULog message types --> metadata.json
 │   │   │   ├── analysis.rs     # Flight modes, stats, battery, GPS, vibration, param diff
+│   │   │   ├── diagnostics/    # Diagnostic analyzers (motor, GPS, battery, EKF, RC)
 │   │   │   ├── pid_analysis.rs # Wiener deconvolution step response (roll/pitch/yaw)
 │   │   │   └── bin/
 │   │   │       └── ulog_convert.rs
+│   │   ├── benches/            # Criterion benchmarks
+│   │   ├── tests/fixtures/     # ULog test fixtures (normal + failure cases)
 │   │   └── Cargo.toml
 │   └── server/             # HTTP API server
 │       ├── src/
@@ -149,7 +156,9 @@ flight-review-rs/
 │   ├── svelte.config.js
 │   └── vite.config.ts
 ├── scripts/
-│   └── download-logs.sh    # Seed local instance with real logs from v1
+│   ├── download-logs.sh    # Seed local instance with real logs from v1
+│   └── ci/
+│       └── check-analyzer.sh  # CI validation for new diagnostic analyzers
 ├── Dockerfile
 ├── Cargo.toml              # Workspace root
 └── README.md
@@ -161,7 +170,7 @@ All files live under a single UUID directory:
 
 ```
 <uuid>/
-├── metadata.json           # Metadata + flight analysis (modes, stats, vibration, GPS track, params)
+├── metadata.json           # Metadata + flight analysis + diagnostics
 ├── <uuid>.ulg              # Original upload
 ├── vehicle_attitude.parquet
 ├── sensor_combined.parquet
@@ -169,13 +178,15 @@ All files live under a single UUID directory:
 └── ...                     # One Parquet file per ULog topic
 ```
 
+The `metadata.json` includes flight modes, stats, battery summary, GPS quality, vibration status, GPS track, parameter diffs, and diagnostic results. Diagnostics are automatically detected during upload and included in the `analysis.diagnostics` array.
+
 ### API
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
 | `POST` | `/api/upload` | Multipart upload -- accepts `.ulg` file + optional context fields |
-| `GET` | `/api/logs` | List/search logs (paginated, filtered by hardware, public/private, etc.) |
+| `GET` | `/api/logs` | List/search logs (paginated, filtered by hardware, diagnostics, etc.) |
 | `GET` | `/api/logs/facets` | Distinct values for filterable fields (hardware, vehicle type, etc.) |
 | `GET` | `/api/logs/:id` | Single log record |
 | `GET` | `/api/logs/:id/track` | GeoJSON GPS track for a single log |
@@ -418,13 +429,13 @@ Import database records, then pre-convert all logs in the background. Useful for
 
 ## CLI
 
-`ulog-convert` is a standalone command-line tool for converting PX4 ULog files to Parquet and JSON. It can extract metadata, run flight analysis, and perform PID step response analysis without running the server. It is useful for scripting, batch processing, CI pipelines, and local analysis workflows.
+`ulog-convert` is a standalone command-line tool for converting PX4 ULog files to Parquet and JSON. It can extract metadata, run flight analysis and diagnostics, perform PID step response analysis, and batch-scan directories for anomalies -- all without running the server or touching a database.
 
 ```bash
 # Full conversion (Parquet + metadata.json)
 ulog-convert flight.ulg output_dir/
 
-# Metadata only (JSON to stdout, pipeable)
+# Metadata + diagnostics only (JSON to stdout)
 ulog-convert --metadata-only flight.ulg
 
 # PID step response analysis
@@ -432,6 +443,21 @@ ulog-convert --pid-analysis flight.ulg
 
 # Compact JSON (for scripting)
 ulog-convert --metadata-only --output-format compact flight.ulg | jq .
+
+# List available diagnostic analyzers
+ulog-convert list-analyzers
+
+# Batch scan a directory for anomalies (parallel, table output)
+ulog-convert scan data/files/ --diagnostics-only
+
+# Scan with JSON output for scripting
+ulog-convert scan data/files/ --diagnostics-only --output-format json
+
+# Scan with specific analyzer(s) only
+ulog-convert scan data/files/ -a gps_interference,ekf_failure
+
+# Version
+ulog-convert --version
 ```
 
 ## Upload Context Fields
@@ -453,6 +479,48 @@ The upload endpoint accepts optional pilot-provided metadata as multipart form f
 | `feedback` | text | Pilot notes |
 | `video_url` | text | Link to flight video |
 | `location_name` | text | Human-readable location |
+
+## Diagnostics
+
+Flight Review automatically detects flight anomalies during upload. Diagnostic analyzers run inside the existing `analyze()` streaming pass -- no separate processing step, no background jobs. Results are stored in `metadata.json`, the `log_diagnostics` database table, and returned via the API.
+
+### Available Analyzers
+
+| Analyzer | Detects | Severity | Topics |
+|----------|---------|----------|--------|
+| `motor_failure` | PWM drop to zero or locked at max while armed | Critical/Warning | `actuator_outputs`, `vehicle_status` |
+| `gps_interference` | EPH/EPV spikes, satellite count drops | Critical/Warning | `vehicle_gps_position` |
+| `battery_brownout` | Voltage below critical threshold during flight | Critical | `battery_status`, `vehicle_status` |
+| `ekf_failure` | Sustained EKF innovation test ratio exceedance | Critical/Warning | `estimator_status` |
+| `rc_loss` | RC signal loss during armed flight | Critical/Warning | `input_rc`, `vehicle_status` |
+
+Query logs by diagnostic:
+
+```bash
+# Logs with motor failures
+curl "http://localhost:8080/api/logs?diagnostic=motor_failure"
+
+# Logs with any critical diagnostic
+curl "http://localhost:8080/api/logs?diagnostic_severity=critical"
+```
+
+### Adding a New Analyzer
+
+1. Create `crates/converter/src/diagnostics/your_analyzer.rs`
+2. Add a variant to the `Evidence` enum in `mod.rs`
+3. Implement the `Analyzer` trait (`id`, `description`, `required_topics`, `on_message`, `finish`)
+4. Register in `create_analyzers()` and declare with `pub mod`
+5. Add a real-world `.ulg` fixture in `tests/fixtures/` that exhibits the failure
+6. Write tests following the required pattern (see `testing.rs`):
+   - No false positives on `sample.ulg`
+   - Detection on real-world fixture
+   - Detection on synthetic data via `MessageBuilder`
+   - Missing fields don't panic
+   - Deduplication
+   - `insta` snapshot test
+7. Run `cargo bench` and include results in the PR
+
+CI (`diagnostics.yml`) validates all of this automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
 
 ## Roadmap
 
