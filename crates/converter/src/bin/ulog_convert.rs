@@ -12,7 +12,7 @@ enum OutputFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "ulog-convert", about = "Convert ULog files to Parquet + metadata")]
+#[command(name = "ulog-convert", version, about = "Convert ULog files to Parquet + metadata")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
