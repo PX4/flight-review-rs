@@ -1,0 +1,175 @@
+---
+source: crates/converter/src/diagnostics/gps_interference.rs
+assertion_line: 343
+expression: diags
+---
+[
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 276.6s: EPV 3750004.2m",
+    "severity": "critical",
+    "timestamp_us": 276594637,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750004.3,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 281.6s: EPV 3750004.5m",
+    "severity": "critical",
+    "timestamp_us": 281595637,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750004.5,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 286.8s: EPV 3750004.5m",
+    "severity": "critical",
+    "timestamp_us": 286798899,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750004.5,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 292.0s: EPV 3750004.8m",
+    "severity": "critical",
+    "timestamp_us": 291994636,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750004.8,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 297.0s: EPV 3750005.0m",
+    "severity": "critical",
+    "timestamp_us": 296994639,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.0,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 302.2s: EPV 3750005.2m",
+    "severity": "critical",
+    "timestamp_us": 302194643,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.3,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 307.2s: EPV 3750005.2m",
+    "severity": "critical",
+    "timestamp_us": 307196637,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.3,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 312.4s: EPV 3750005.5m",
+    "severity": "critical",
+    "timestamp_us": 312394638,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.5,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 317.4s: EPV 3750005.8m",
+    "severity": "critical",
+    "timestamp_us": 317395912,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.8,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 322.4s: EPV 3750005.8m",
+    "severity": "critical",
+    "timestamp_us": 322396069,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750005.8,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 327.4s: EPV 3750006.0m",
+    "severity": "critical",
+    "timestamp_us": 327397637,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750006.0,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  },
+  {
+    "id": "gps_interference",
+    "summary": "GPS quality degraded at 332.6s: EPV 3750006.0m",
+    "severity": "critical",
+    "timestamp_us": 332595636,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "GpsInterference",
+      "eph_m": 4294967.5,
+      "epv_m": 3750006.0,
+      "num_satellites": 0,
+      "noise_level": null
+    }
+  }
+]

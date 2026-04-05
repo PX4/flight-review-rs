@@ -284,4 +284,18 @@ mod tests {
         let diags = analyze_fixture_for("sample.ulg", "battery_brownout");
         insta::assert_json_snapshot!(diags);
     }
+
+    #[test]
+    fn detects_real_battery_brownout() {
+        let diags = analyze_fixture_for("battery_brownout.ulg", "battery_brownout");
+        assert!(
+            !diags.is_empty(),
+            "Should detect brownout in real low-voltage log"
+        );
+        assert!(
+            diags.iter().all(|d| d.severity == Severity::Critical),
+            "All brownout detections should be critical"
+        );
+        insta::assert_json_snapshot!(diags);
+    }
 }

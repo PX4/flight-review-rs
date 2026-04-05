@@ -267,4 +267,19 @@ mod tests {
         let diags = analyze_fixture_for("sample.ulg", "ekf_failure");
         insta::assert_json_snapshot!(diags);
     }
+
+    #[test]
+    fn detects_real_ekf_failure() {
+        let diags = analyze_fixture_for("ekf_failure.ulg", "ekf_failure");
+        assert!(
+            !diags.is_empty(),
+            "Should detect EKF failures in real log"
+        );
+        // Should detect at least one escalation to critical
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Critical),
+            "Should have at least one critical EKF failure"
+        );
+        insta::assert_json_snapshot!(diags);
+    }
 }

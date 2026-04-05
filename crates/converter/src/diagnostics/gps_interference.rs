@@ -328,4 +328,18 @@ mod tests {
         let diags = analyze_fixture_for("sample.ulg", "gps_interference");
         insta::assert_json_snapshot!(diags);
     }
+
+    #[test]
+    fn detects_real_gps_interference() {
+        let diags = analyze_fixture_for("gps_interference.ulg", "gps_interference");
+        assert!(
+            !diags.is_empty(),
+            "Should detect GPS interference in real log"
+        );
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Critical),
+            "Should have at least one critical GPS event"
+        );
+        insta::assert_json_snapshot!(diags);
+    }
 }

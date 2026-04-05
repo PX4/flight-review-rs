@@ -30,6 +30,11 @@
 //! 3. **Missing fields** — messages with missing fields must not panic
 //! 4. **Deduplication** — same failure doesn't fire repeatedly
 //! 5. **Snapshot** — `insta::assert_json_snapshot!` for CI diffing
+//! 6. **Real-world fixture** — a `.ulg` file in `tests/fixtures/` that exhibits
+//!    the failure mode, with a test that asserts detection fires. Name it after
+//!    the analyzer (e.g. `motor_failure.ulg`). Use `ulog-convert scan` against
+//!    a corpus to find candidate files. Without a real fixture, the analyzer
+//!    is untested against actual PX4 telemetry and will not be accepted.
 
 use super::Diagnostic;
 use px4_ulog::stream_parser::model::{

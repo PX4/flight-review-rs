@@ -375,4 +375,19 @@ mod tests {
         let diags = analyze_fixture_for("sample.ulg", "motor_failure");
         insta::assert_json_snapshot!(diags);
     }
+
+    // ---- Real-world fixture test ----
+    #[test]
+    fn detects_real_motor_failure() {
+        let diags = analyze_fixture_for("motor_failure.ulg", "motor_failure");
+        assert!(
+            !diags.is_empty(),
+            "Should detect motor failures in real crash log"
+        );
+        assert!(
+            diags.iter().any(|d| d.severity == Severity::Critical),
+            "Should have at least one critical motor failure"
+        );
+        insta::assert_json_snapshot!(diags);
+    }
 }

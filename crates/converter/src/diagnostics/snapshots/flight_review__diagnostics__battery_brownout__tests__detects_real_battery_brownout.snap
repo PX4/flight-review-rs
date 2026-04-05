@@ -1,0 +1,46 @@
+---
+source: crates/converter/src/diagnostics/battery_brownout.rs
+assertion_line: 299
+expression: diags
+---
+[
+  {
+    "id": "battery_brownout",
+    "summary": "Battery voltage 0.06V below critical threshold 3.3V at 159.0s (1S)",
+    "severity": "critical",
+    "timestamp_us": 158986930,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "BatteryBrownout",
+      "voltage_v": 0.058330078,
+      "critical_threshold_v": 3.3,
+      "current_a": 0.09705625
+    }
+  },
+  {
+    "id": "battery_brownout",
+    "summary": "Battery voltage 0.05V below critical threshold 3.3V at 189.2s (1S)",
+    "severity": "critical",
+    "timestamp_us": 189186929,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "BatteryBrownout",
+      "voltage_v": 0.048304595,
+      "critical_threshold_v": 3.3,
+      "current_a": 0.10255
+    }
+  },
+  {
+    "id": "battery_brownout",
+    "summary": "Battery voltage 0.05V below critical threshold 3.3V at 219.4s (1S)",
+    "severity": "critical",
+    "timestamp_us": 219386927,
+    "end_timestamp_us": null,
+    "evidence": {
+      "type": "BatteryBrownout",
+      "voltage_v": 0.05103882,
+      "critical_threshold_v": 3.3,
+      "current_a": 0.10804375
+    }
+  }
+]

@@ -1,0 +1,46 @@
+---
+source: crates/converter/src/diagnostics/ekf_failure.rs
+assertion_line: 283
+expression: diags
+---
+[
+  {
+    "id": "ekf_failure",
+    "summary": "EKF velocity innovation exceeded threshold for 2.2s starting at 117.3s",
+    "severity": "warning",
+    "timestamp_us": 117349822,
+    "end_timestamp_us": 119539590,
+    "evidence": {
+      "type": "EkfFailure",
+      "innovation": "velocity",
+      "test_ratio": 1.1373149,
+      "threshold": 1.0
+    }
+  },
+  {
+    "id": "ekf_failure",
+    "summary": "EKF position innovation exceeded threshold for 2.0s starting at 117.9s",
+    "severity": "warning",
+    "timestamp_us": 117939397,
+    "end_timestamp_us": 119939471,
+    "evidence": {
+      "type": "EkfFailure",
+      "innovation": "position",
+      "test_ratio": 1.2692708,
+      "threshold": 1.0
+    }
+  },
+  {
+    "id": "ekf_failure",
+    "summary": "EKF position innovation exceeded threshold for 5.0s starting at 117.9s",
+    "severity": "critical",
+    "timestamp_us": 117939397,
+    "end_timestamp_us": 122949150,
+    "evidence": {
+      "type": "EkfFailure",
+      "innovation": "position",
+      "test_ratio": 1.3362613,
+      "threshold": 1.0
+    }
+  }
+]
