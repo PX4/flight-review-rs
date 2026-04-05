@@ -10,6 +10,7 @@ use px4_ulog::stream_parser::file_reader::{
 };
 use px4_ulog::stream_parser::model::FlattenedFieldType;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -24,6 +25,9 @@ pub struct FlightAnalysis {
     pub gps_track: Vec<TrackPoint>,
     /// Per-topic-field statistics (min, max, mean)
     pub field_stats: Vec<FieldStat>,
+    /// Diagnostic anomalies detected during analysis.
+    #[serde(default)]
+    pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,7 +224,7 @@ fn is_numeric_field_type(ft: &FlattenedFieldType) -> bool {
     !matches!(ft, FlattenedFieldType::Bool | FlattenedFieldType::Char)
 }
 
-fn nav_state_name(id: u8) -> &'static str {
+pub(crate) fn nav_state_name(id: u8) -> &'static str {
     match id {
         0 => "Manual",
         1 => "Altitude",
@@ -324,6 +328,13 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     // Build flight mode timeline reference for GPS track annotation
     // We'll finalize modes after the pass, so track raw mode changes
     let mut mode_changes: Vec<(u64, u8)> = Vec::new();
+
+    // Diagnostic analyzers — piggyback on the same streaming pass
+    let mut analyzers = crate::diagnostics::create_analyzers();
+    let diagnostic_topics: HashSet<String> = analyzers
+        .iter()
+        .flat_map(|a| a.required_topics().iter().map(|s| s.to_string()))
+        .collect();
 
     // Per-field stats: topic -> Vec<RunningStats>
     // On first message for each topic, discover numeric fields and create RunningStats entries.
@@ -719,6 +730,15 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
 
                     _ => {}
                 }
+
+                // Dispatch to diagnostic analyzers
+                if diagnostic_topics.contains(topic) {
+                    for analyzer in analyzers.iter_mut() {
+                        if analyzer.required_topics().contains(&topic) {
+                            analyzer.on_message(data);
+                        }
+                    }
+                }
             }
         SimpleCallbackResult::KeepReading
     })?;
@@ -838,6 +858,12 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     analysis
         .field_stats
         .sort_by(|a, b| a.topic.cmp(&b.topic).then_with(|| a.field.cmp(&b.field)));
+
+    // --- Finalize diagnostics ---
+    analysis.diagnostics = analyzers
+        .into_iter()
+        .flat_map(|a| a.finish())
+        .collect();
 
     Ok(analysis)
 }
@@ -1046,5 +1072,17 @@ mod tests {
                 count
             );
         }
+    }
+
+    #[test]
+    fn test_diagnostics_no_false_positives() {
+        let path = px4_ulog_fixture("sample.ulg");
+        let meta = extract_metadata(&path).unwrap();
+        let analysis = analyze(&path, &meta).unwrap();
+        assert!(
+            analysis.diagnostics.is_empty(),
+            "Normal flight should produce no diagnostics, got: {:?}",
+            analysis.diagnostics
+        );
     }
 }
