@@ -38,6 +38,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List available diagnostic analyzers
+    ListAnalyzers,
+
     /// Scan a directory of ULog files for diagnostics
     Scan {
         /// Directory containing .ulg files (searched recursively)
@@ -70,15 +73,26 @@ fn serialize_metadata(
 fn main() {
     let cli = Cli::parse();
 
-    if let Some(Command::Scan {
-        path,
-        diagnostics_only,
-        jobs,
-        output_format,
-    }) = cli.command
-    {
-        run_scan(&path, diagnostics_only, jobs, &output_format);
-        return;
+    match cli.command {
+        Some(Command::ListAnalyzers) => {
+            let analyzers = flight_review::diagnostics::create_analyzers();
+            for a in &analyzers {
+                println!("{:<20} {}", a.id(), a.description());
+                println!("{:<20} topics: {}", "", a.required_topics().join(", "));
+                println!();
+            }
+            return;
+        }
+        Some(Command::Scan {
+            path,
+            diagnostics_only,
+            jobs,
+            output_format,
+        }) => {
+            run_scan(&path, diagnostics_only, jobs, &output_format);
+            return;
+        }
+        None => {}
     }
 
     let input = match cli.input {

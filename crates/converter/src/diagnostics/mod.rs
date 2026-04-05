@@ -102,6 +102,12 @@ pub struct Diagnostic {
 /// [`on_message()`](Analyzer::on_message) during the streaming pass in
 /// `analyze()`, and emit diagnostics via [`finish()`](Analyzer::finish).
 pub trait Analyzer {
+    /// Machine-readable identifier (e.g. "motor_failure").
+    fn id(&self) -> &str;
+
+    /// Short human-readable description.
+    fn description(&self) -> &str;
+
     /// Which ULog topics this analyzer needs.
     /// The `analyze()` callback will only dispatch messages for these topics.
     fn required_topics(&self) -> &[&str];

@@ -67,6 +67,14 @@ impl MotorFailureAnalyzer {
 }
 
 impl Analyzer for MotorFailureAnalyzer {
+    fn id(&self) -> &str {
+        "motor_failure"
+    }
+
+    fn description(&self) -> &str {
+        "PWM drop/lock detection while armed"
+    }
+
     fn required_topics(&self) -> &[&str] {
         &["actuator_outputs", "vehicle_status"]
     }

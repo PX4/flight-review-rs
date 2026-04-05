@@ -56,6 +56,14 @@ impl GpsInterferenceAnalyzer {
 }
 
 impl Analyzer for GpsInterferenceAnalyzer {
+    fn id(&self) -> &str {
+        "gps_interference"
+    }
+
+    fn description(&self) -> &str {
+        "EPH/EPV spike, satellite count drop"
+    }
+
     fn required_topics(&self) -> &[&str] {
         &["vehicle_gps_position"]
     }

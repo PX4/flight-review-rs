@@ -69,6 +69,14 @@ impl RcLossAnalyzer {
 }
 
 impl Analyzer for RcLossAnalyzer {
+    fn id(&self) -> &str {
+        "rc_loss"
+    }
+
+    fn description(&self) -> &str {
+        "RC signal loss during armed flight"
+    }
+
     fn required_topics(&self) -> &[&str] {
         &["input_rc", "vehicle_status"]
     }

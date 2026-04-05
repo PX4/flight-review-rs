@@ -47,6 +47,14 @@ impl BatteryBrownoutAnalyzer {
 }
 
 impl Analyzer for BatteryBrownoutAnalyzer {
+    fn id(&self) -> &str {
+        "battery_brownout"
+    }
+
+    fn description(&self) -> &str {
+        "Voltage below critical threshold"
+    }
+
     fn required_topics(&self) -> &[&str] {
         &["battery_status", "vehicle_status"]
     }

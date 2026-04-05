@@ -122,6 +122,14 @@ impl EkfFailureAnalyzer {
 }
 
 impl Analyzer for EkfFailureAnalyzer {
+    fn id(&self) -> &str {
+        "ekf_failure"
+    }
+
+    fn description(&self) -> &str {
+        "Sustained EKF innovation exceedance"
+    }
+
     fn required_topics(&self) -> &[&str] {
         &["estimator_status"]
     }
