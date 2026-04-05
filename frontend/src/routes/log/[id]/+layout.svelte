@@ -51,6 +51,12 @@
 	});
 
 	onDestroy(() => {
+		// Clear the per-log session cache so closed LogSessions don't linger
+		const cache: Map<string, any> | undefined = (globalThis as any).__plotSessionCache;
+		if (cache) {
+			for (const session of cache.values()) session.close();
+			cache.clear();
+		}
 		terminateDuckDB();
 	});
 

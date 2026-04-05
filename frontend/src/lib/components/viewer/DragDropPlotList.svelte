@@ -2,6 +2,7 @@
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
 	import { reorderPlots } from '$lib/stores/logViewer';
 	import PlotStrip from './PlotStrip.svelte';
+	import LazyPlot from './LazyPlot.svelte';
 
 	let { plots, logId, metadata } = $props<{
 		plots: PlotConfig[];
@@ -72,17 +73,19 @@
 			{#if dropTargetIndex === i && dragFromIndex !== null && dragFromIndex !== i}
 				<div class="absolute -top-px left-0 right-0 h-0.5 bg-blue-500 z-10 rounded-full"></div>
 			{/if}
-			<PlotStrip
-				config={plot}
-				{logId}
-				{metadata}
-				index={i}
-				totalCount={plots.length}
-				onMoveUp={() => moveUp(i)}
-				onMoveDown={() => moveDown(i)}
-				onDragStart={handleDragStart(i)}
-				onDragEnd={handleDragEnd}
-			/>
+			<LazyPlot>
+				<PlotStrip
+					config={plot}
+					{logId}
+					{metadata}
+					index={i}
+					totalCount={plots.length}
+					onMoveUp={() => moveUp(i)}
+					onMoveDown={() => moveDown(i)}
+					onDragStart={handleDragStart(i)}
+					onDragEnd={handleDragEnd}
+				/>
+			</LazyPlot>
 		</div>
 	{/each}
 </div>
