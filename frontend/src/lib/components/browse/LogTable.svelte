@@ -99,8 +99,8 @@
 								>
 									{#if col.key === 'vehicle_type'}
 										<div class="flex items-center gap-2">
-											<img src={vehicleIconPath(log.vehicle_type)} alt="" class="size-6 opacity-60" />
-											<span class="font-medium text-gray-900">{log.vehicle_type || log.sys_name || '\u2014'}</span>
+											<img src={vehicleIconPath(log.vehicle_type)} alt={log.vehicle_type ?? ''} class="size-6 opacity-60" />
+											<span class="hidden sm:inline font-medium text-gray-900">{log.vehicle_type || log.sys_name || '\u2014'}</span>
 										</div>
 									{:else if col.key === 'location_name'}
 										{#if loc}
