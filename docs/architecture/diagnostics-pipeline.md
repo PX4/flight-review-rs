@@ -77,7 +77,47 @@ pub enum Severity {
     Critical,
 }
 
-/// A single detected anomaly with evidence.
+/// Typed evidence for each diagnostic kind.
+///
+/// Every analyzer returns a specific variant — not a freeform map. This means
+/// the frontend can match on the variant and render structured UI for each
+/// diagnostic type without guessing at keys. Adding a new analyzer means
+/// adding a new variant here; changing an existing variant is a breaking
+/// change that requires a version bump and migration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum Evidence {
+    MotorFailure {
+        motor_index: u8,
+        pwm_value: f32,
+        /// "drop_to_zero" or "locked_at_max"
+        failure_mode: String,
+        flight_mode: String,
+    },
+    GpsInterference {
+        eph_m: f32,
+        epv_m: f32,
+        num_satellites: u16,
+        noise_level: Option<f32>,
+    },
+    BatteryBrownout {
+        voltage_v: f32,
+        critical_threshold_v: f32,
+        current_a: Option<f32>,
+    },
+    EkfFailure {
+        /// Which innovation failed (e.g. "velocity", "position", "heading")
+        innovation: String,
+        test_ratio: f32,
+        threshold: f32,
+    },
+    RcLoss {
+        last_signal_timestamp_us: u64,
+        signal_lost_duration_ms: u64,
+    },
+}
+
+/// A single detected anomaly with typed evidence.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
     /// Machine-readable identifier, e.g. "motor_failure", "gps_interference".
@@ -90,14 +130,8 @@ pub struct Diagnostic {
     pub timestamp_us: u64,
     /// Optional end timestamp if the anomaly spans a window.
     pub end_timestamp_us: Option<u64>,
-    /// Key-value evidence (e.g. {"motor_index": "2", "pwm_value": "0"}).
-    pub evidence: HashMap<String, String>,
-}
-
-/// Result of running all diagnostics on a single flight.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct DiagnosticsResult {
-    pub diagnostics: Vec<Diagnostic>,
+    /// Typed, structured evidence specific to this diagnostic.
+    pub evidence: Evidence,
 }
 
 /// Trait that all diagnostic analyzers implement.
@@ -121,6 +155,24 @@ pub trait Analyzer {
     fn finish(self) -> Vec<Diagnostic>;
 }
 ```
+
+The `Evidence` enum is the contract between analyzers and the frontend. It uses
+`#[serde(tag = "type")]` so JSON output is self-describing:
+
+```json
+{
+  "type": "MotorFailure",
+  "motor_index": 3,
+  "pwm_value": 0.0,
+  "failure_mode": "drop_to_zero",
+  "flight_mode": "Position"
+}
+```
+
+Adding a new analyzer means adding a new `Evidence` variant. The compiler
+enforces that every field is populated — no missing keys, no typos, no runtime
+surprises. Changing an existing variant's fields is a breaking change that
+requires bumping `ANALYSIS_VERSION` and reprocessing affected logs.
 
 ### Integration into analyze()
 
@@ -329,8 +381,10 @@ Diagnostics are included in `metadata.json` and returned by `GET /api/logs/{id}`
       "timestamp_us": 38500000,
       "end_timestamp_us": null,
       "evidence": {
-        "motor_index": "3",
-        "pwm_value": "0",
+        "type": "MotorFailure",
+        "motor_index": 3,
+        "pwm_value": 0.0,
+        "failure_mode": "drop_to_zero",
         "flight_mode": "Position"
       }
     }
@@ -347,20 +401,125 @@ GET /api/logs?diagnostic=motor_failure
 GET /api/logs?diagnostic_severity=critical
 ```
 
+## Security: Analyzers Process Untrusted Input
+
+Analyzers ship as reviewed Rust code — they are not runtime plugins. But the
+data they process is untrusted: anyone can upload a ULog file to the server, and
+that file may be crafted to exploit analyzer logic. Since analyzers run inside
+the server process (in `spawn_blocking`), a vulnerability here means access to
+S3 credentials, RDS connections, and memory shared with other requests.
+
+### Threat Model
+
+- **Malformed ULog fields.** Crafted messages with out-of-bounds offsets,
+  unexpected field types, or extreme values designed to trigger panics,
+  overflows, or unbounded allocations.
+- **Resource exhaustion.** A ULog file with millions of messages for a
+  subscribed topic, designed to blow up a sliding window buffer or cause
+  O(n²) behavior in an analyzer.
+- **Logical manipulation.** Valid-looking data tuned to produce misleading
+  diagnostics (false positives at scale could erode trust in the system).
+
+### Required Defenses
+
+Every analyzer PR must satisfy these before merge:
+
+- **Bounds-checked field reads.** All field access must go through safe helper
+  functions that validate offsets and sizes before reading. No raw pointer
+  arithmetic, no unchecked slice indexing. The existing `RunningStats::update()`
+  in `analysis.rs` is the model — it checks `off + N > data.len()` before every
+  read.
+- **Fixed-size buffers.** Sliding windows and accumulators must have a compile-
+  time or config-time maximum size. No `Vec` that grows proportionally to
+  message count without a cap.
+- **No panics on bad data.** Analyzers must handle malformed input gracefully —
+  skip the message, not crash the server. `#[cfg(test)]` fuzz tests against
+  randomized/truncated payloads are encouraged.
+- **No allocations proportional to untrusted input.** Don't use a user-
+  controlled field value as a Vec capacity or HashMap key count.
+
+### CI Enforcement
+
+- A **fuzz test target** (`fuzz/fuzz_diagnostics.rs`) feeds randomized ULog
+  byte streams through the full analyzer pipeline. This runs in CI on every PR
+  that touches `crates/converter/src/diagnostics/`.
+- `#[should_panic]` tests are not allowed in analyzer code — if something can
+  panic, it's a bug.
+
+## Output Schema Stability
+
+The diagnostics JSON is a contract between the converter crate and the frontend.
+If it changes silently, the frontend breaks. If every analyzer invents its own
+shape, the frontend can't render structured UI.
+
+### Typed Evidence Enum
+
+The `Evidence` enum (defined above) is the enforcement mechanism. Each analyzer
+returns a specific variant with typed fields — not a freeform `HashMap<String,
+String>`. The compiler ensures every field is present and correctly typed at
+build time. The frontend matches on `evidence.type` and renders per-diagnostic
+UI.
+
+### Snapshot Tests
+
+Every analyzer must include a **snapshot test** that captures the exact JSON
+output for its test fixtures. These live alongside the analyzer code:
+
+```
+tests/snapshots/
+├── motor_failure__crash_log.json.snap
+├── motor_failure__normal_flight.json.snap
+├── gps_interference__jamming.json.snap
+└── ...
+```
+
+Using [`insta`](https://docs.rs/insta) for snapshot testing:
+
+```rust
+#[test]
+fn test_motor_failure_crash_log() {
+    let analysis = analyze("tests/fixtures/motor_crash.ulg", &metadata).unwrap();
+    let diagnostics: Vec<_> = analysis.diagnostics.iter()
+        .filter(|d| d.id == "motor_failure")
+        .collect();
+    insta::assert_json_snapshot!(diagnostics);
+}
+```
+
+If an analyzer changes its output — different field values, added fields,
+changed structure — the snapshot test fails and the diff is visible in the PR.
+Reviewers can see exactly what changed and whether the frontend needs updating.
+
+### Schema Evolution Rules
+
+- **Adding a new `Evidence` variant** (new analyzer): non-breaking. The
+  frontend can ignore unknown types gracefully.
+- **Adding an `Option<T>` field to an existing variant**: non-breaking.
+  Existing JSON deserializes with `None`. Must bump `ANALYSIS_VERSION` so
+  backfill populates the new field.
+- **Renaming or removing a field from an existing variant**: **breaking**.
+  Requires a coordinated frontend + backend change, version bump, and full
+  backfill.
+- **Changing a field type** (e.g., `f32` → `f64`): **breaking**. Same process.
+
 ## How to Add a New Analyzer
 
 1. Create `crates/converter/src/diagnostics/your_analyzer.rs`
-2. Implement the `Analyzer` trait
-3. Register it in the analyzer list inside `analyze()`
-4. Add test fixtures: at least one known-good and one known-bad ULog in
+2. Add a new variant to the `Evidence` enum for your diagnostic type
+3. Implement the `Analyzer` trait
+4. Register it in the analyzer list inside `analyze()`
+5. Add test fixtures: at least one known-good and one known-bad ULog in
    `tests/fixtures/`
-5. Run `cargo bench` and include the results in your PR description
-6. Test via the CLI first: `cargo run --bin ulog_convert -- bad_log.ulg -o ./out`
-7. Open a PR
+6. Add snapshot tests using `insta` for each fixture
+7. Add a fuzz test case covering your analyzer's field parsing
+8. Run `cargo bench` and include the results in your PR description
+9. Test via the CLI first: `cargo run --bin ulog_convert -- bad_log.ulg -o ./out`
+10. Open a PR
 
 Each analyzer is self-contained: it declares its topic dependencies, processes
-messages, and emits `Diagnostic` values. No changes to the upload handler,
-storage layer, or database schema are needed to add a new analyzer.
+messages, and emits `Diagnostic` values with typed `Evidence`. No changes to the
+upload handler, storage layer, or database schema are needed to add a new
+analyzer.
 
 ## What's In Scope for Contributors
 
