@@ -298,7 +298,7 @@ fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs:
             }
 
             // Progress on stderr every 100 files
-            if n % 100 == 0 || n == total {
+            if n.is_multiple_of(100) || n == total {
                 eprint!("\r  [{n}/{total}] processed");
             }
 
