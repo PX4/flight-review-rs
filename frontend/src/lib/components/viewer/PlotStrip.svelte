@@ -5,6 +5,7 @@
 	import { activePlots, togglePlotMinimized } from '$lib/stores/logViewer';
 	import { timeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
 	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
+	import { touchZoomPlugin } from '$lib/utils/uplotTouchZoom';
 
 	let { config, logId, metadata, index, totalCount, onMoveUp, onMoveDown, onDragStart, onDragEnd } = $props<{
 		config: PlotConfig;
@@ -97,8 +98,10 @@
 			const opts: uPlot.Options = {
 				width: containerWidth,
 				height: plotHeight,
+				plugins: [touchZoomPlugin()],
 				cursor: {
 					sync: { key: SYNC_KEY, setSeries: true },
+					drag: { x: true, y: false, setScale: true },
 				},
 				scales: {
 					x: { time: false },
@@ -322,6 +325,6 @@
 				</div>
 			</div>
 		{/if}
-		<div bind:this={chartEl}></div>
+		<div bind:this={chartEl} class="touch-action-none" style="touch-action: none;"></div>
 	</div>
 </div>
