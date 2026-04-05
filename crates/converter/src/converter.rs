@@ -17,6 +17,8 @@ use parquet::basic::Compression;
 use parquet::file::properties::WriterProperties;
 use px4_ulog::full_parser::SomeVec;
 
+use serde::{Deserialize, Serialize};
+
 use crate::metadata::FlightMetadata;
 
 #[derive(Debug, thiserror::Error)]
@@ -37,6 +39,64 @@ pub struct ConvertResult {
     pub parquet_files: Vec<PathBuf>,
     /// Extracted flight metadata.
     pub metadata: FlightMetadata,
+}
+
+/// Conversion manifest — describes what was produced and where to find it.
+///
+/// Written as `manifest.json` alongside the Parquet files. Provides a
+/// self-describing map of the conversion output for downstream consumers
+/// (data scientists, ML pipelines, etc.).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Manifest {
+    /// Manifest format version.
+    pub version: u32,
+    /// Original source file name.
+    pub source: String,
+    /// Vehicle name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vehicle: Option<String>,
+    /// Hardware identifier.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hardware: Option<String>,
+    /// Flight duration in seconds.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duration_s: Option<f64>,
+    /// File map: topic name → relative Parquet file path.
+    pub topics: HashMap<String, String>,
+    /// Diagnostic results (empty if no anomalies detected).
+    pub diagnostics: Vec<crate::diagnostics::Diagnostic>,
+}
+
+impl Manifest {
+    /// Build a manifest from a conversion result and the original filename.
+    pub fn from_result(result: &ConvertResult, source_filename: &str) -> Self {
+        let topics: HashMap<String, String> = result
+            .parquet_files
+            .iter()
+            .filter_map(|p| {
+                let filename = p.file_name()?.to_str()?.to_string();
+                let topic = filename.strip_suffix(".parquet")?.to_string();
+                Some((topic, filename))
+            })
+            .collect();
+
+        let diagnostics = result
+            .metadata
+            .analysis
+            .as_ref()
+            .map(|a| a.diagnostics.clone())
+            .unwrap_or_default();
+
+        Self {
+            version: 1,
+            source: source_filename.to_string(),
+            vehicle: result.metadata.sys_name.clone(),
+            hardware: result.metadata.ver_hw.clone(),
+            duration_s: result.metadata.flight_duration_s,
+            topics,
+            diagnostics,
+        }
+    }
 }
 
 /// Convert a ULog file to per-topic Parquet files in the given output directory.
@@ -70,10 +130,22 @@ pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult
         }
     }
 
-    Ok(ConvertResult {
+    let result = ConvertResult {
         parquet_files,
         metadata,
-    })
+    };
+
+    // Write manifest
+    let source_name = Path::new(input_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown.ulg");
+    let manifest = Manifest::from_result(&result, source_name);
+    let manifest_json = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    std::fs::write(output_dir.join("manifest.json"), manifest_json)?;
+
+    Ok(result)
 }
 
 /// Write a single topic's data as a Parquet file.
