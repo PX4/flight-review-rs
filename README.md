@@ -560,17 +560,68 @@ curl "http://localhost:8080/api/logs?diagnostic_severity=critical"
 
 CI (`diagnostics.yml`) validates all of this automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
 
-## Signal Processing
+## For Researchers
 
-The signal processing framework provides a trait-based system for running analyses that need full time-series data (FFT, spectral analysis, deconvolution). Unlike diagnostics (which are streaming), signal processing modules declare what signals they need, the framework extracts them in a single ULog pass, and modules receive the buffered data.
+There are two paths for working with flight log data, depending on your tools and workflow.
 
-### Available Modules
+### Path 1: Parquet export for Python / ML workflows
+
+Convert ULog files to Parquet and work with them using your existing tools (polars, pandas, DuckDB, scikit-learn, PyTorch). The CLI handles all the ULog parsing and produces a self-describing dataset.
+
+```bash
+# Convert a directory of flight logs to Parquet
+ulog-convert batch logs/ -o dataset/ --diagnostics
+
+# Output structure:
+# dataset/
+# ├── index.json              ← entry point: lists all logs
+# ├── log_001/
+# │   ├── manifest.json       ← file map + diagnostic labels
+# │   ├── metadata.json       ← full flight metadata
+# │   ├── vehicle_attitude.parquet
+# │   ├── sensor_combined.parquet
+# │   └── ...
+# └── log_002/
+#     └── ...
+```
+
+From Python:
+
+```python
+import json, polars as pl
+
+# Load the dataset index
+with open("dataset/index.json") as f:
+    index = json.load(f)
+
+# Find logs with motor failures
+crashes = [log for log in index["logs"] if log["diagnostic_count"] > 0]
+
+# Load a specific topic as a dataframe
+df = pl.read_parquet(f"dataset/{crashes[0]['path']}/vehicle_attitude.parquet")
+```
+
+The diagnostic labels in each `manifest.json` provide pre-computed anomaly annotations with timestamps and severity -- usable as training labels for supervised learning without manually reviewing flights.
+
+### Path 2: Rust-native signal processing modules
+
+For analyses that need to run at scale across thousands of logs, or that you want to contribute back to the tool, write a Rust module that plugs into the signal processing framework. You declare what signals you need, the framework extracts them from the ULog file, and you receive buffered time-series data ready for FFT, spectral analysis, or deconvolution.
+
+```bash
+# Run signal processing on a single file
+ulog-convert analyze flight.ulg
+
+# Batch across a directory (parallel)
+ulog-convert batch logs/ --analyze -m pid_step_response
+```
+
+#### Available Modules
 
 | Module | Description | Topics |
 |--------|-------------|--------|
 | `pid_step_response` | PID controller step response via Wiener deconvolution | `vehicle_rates_setpoint`, `vehicle_angular_velocity` |
 
-### Adding a New Module
+#### Adding a New Module
 
 1. Create `crates/converter/src/signal_processing/your_module.rs`
 2. Implement the `SignalAnalysis` trait (`id`, `description`, `required_signals`, `analyze`)
