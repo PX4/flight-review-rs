@@ -333,6 +333,8 @@ async fn run_migrate(config: MigrateConfig) {
             total_distance_m: None,
             error_count,
             warning_count,
+            analysis_version: None,
+            diagnostic_flags: None,
         };
 
         match v2_db.insert(&record).await {

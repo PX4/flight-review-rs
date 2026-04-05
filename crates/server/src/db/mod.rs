@@ -195,6 +195,10 @@ pub struct LogRecord {
     pub error_count: Option<i32>,
     /// Number of warning-level events/messages
     pub warning_count: Option<i32>,
+    /// Analysis version used when this log was last processed
+    pub analysis_version: Option<i32>,
+    /// Comma-separated diagnostic IDs detected (e.g. "motor_failure,gps_interference")
+    pub diagnostic_flags: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -256,6 +260,11 @@ pub struct ListFilters {
     pub field_max: Option<String>,
     /// Filter: field min below threshold. Format: "topic.field:value"
     pub field_min: Option<String>,
+
+    /// Filter by diagnostic presence (e.g. "motor_failure")
+    pub diagnostic: Option<String>,
+    /// Filter by diagnostic severity (e.g. "critical")
+    pub diagnostic_severity: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -333,6 +342,7 @@ pub trait LogStore: Send + Sync {
     async fn insert_tags(&self, log_id: Uuid, tags: &[String]) -> Result<(), DbError>;
     async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError>;
     async fn insert_field_stats(&self, log_id: Uuid, stats: &[FieldStatRecord]) -> Result<(), DbError>;
+    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[DiagnosticRecord]) -> Result<(), DbError>;
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError>;
 }
 
@@ -355,6 +365,17 @@ pub fn bounding_box(lat: f64, lon: f64, radius_km: f64) -> (f64, f64, f64, f64) 
         radius_km / (111.32 * cos_lat)
     };
     (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta)
+}
+
+/// A record for the `log_diagnostics` junction table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiagnosticRecord {
+    pub diagnostic_id: String,
+    pub severity: String,
+    pub summary: String,
+    pub timestamp_us: Option<i64>,
+    pub end_timestamp_us: Option<i64>,
+    pub evidence: Option<String>,
 }
 
 /// A record for the `log_field_stats` junction table.

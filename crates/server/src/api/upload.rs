@@ -183,6 +183,8 @@ pub async fn upload(
         total_distance_m: search.total_distance_m,
         error_count: search.error_count,
         warning_count: search.warning_count,
+        analysis_version: Some(flight_review::diagnostics::ANALYSIS_VERSION as i32),
+        diagnostic_flags: search.diagnostic_flags,
     };
 
     state.db.insert(&record).await?;
@@ -202,6 +204,23 @@ pub async fn upload(
             })
             .collect();
         state.db.insert_field_stats(log_id, &field_stats).await?;
+
+        // Insert diagnostics
+        if !analysis.diagnostics.is_empty() {
+            let diag_records: Vec<crate::db::DiagnosticRecord> = analysis
+                .diagnostics
+                .iter()
+                .map(|d| crate::db::DiagnosticRecord {
+                    diagnostic_id: d.id.clone(),
+                    severity: format!("{:?}", d.severity).to_lowercase(),
+                    summary: d.summary.clone(),
+                    timestamp_us: Some(d.timestamp_us as i64),
+                    end_timestamp_us: d.end_timestamp_us.map(|t| t as i64),
+                    evidence: serde_json::to_string(&d.evidence).ok(),
+                })
+                .collect();
+            state.db.insert_diagnostics(log_id, &diag_records).await?;
+        }
     }
 
     // 7. Temp files cleaned up when tmp_dir is dropped

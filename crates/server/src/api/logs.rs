@@ -318,6 +318,8 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
         record.total_distance_m = search.total_distance_m.or(record.total_distance_m);
         record.error_count = search.error_count.or(record.error_count);
         record.warning_count = search.warning_count.or(record.warning_count);
+        record.analysis_version = Some(flight_review::diagnostics::ANALYSIS_VERSION as i32);
+        record.diagnostic_flags = search.diagnostic_flags.or(record.diagnostic_flags);
 
         // Reverse-geocode if location_name is still empty after conversion
         let has_location = record
