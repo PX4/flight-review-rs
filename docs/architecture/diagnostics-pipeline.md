@@ -403,10 +403,106 @@ all of the following before it can be merged:
 - **Size budget:** Model artifacts must be under **1 MB** uncompressed. Larger
   models need explicit maintainer approval and a justification for the size.
 
+## Backfill: Reprocessing Historical Logs
+
+Flight Review serves two audiences: self-hosted users with hundreds of logs and
+logs.px4.io with hundreds of thousands. When a new analyzer lands, all
+historical logs need reprocessing — but the approach differs by scale.
+
+### Analysis Versioning
+
+Every log record carries an `analysis_version` integer (stored in the `logs`
+table). Each time the set of analyzers changes — new analyzer added, existing
+one updated — the version constant in the converter crate is bumped. This tells
+any reprocessing tool exactly which logs are stale.
+
+```rust
+// crates/converter/src/diagnostics/mod.rs
+pub const ANALYSIS_VERSION: u32 = 1;
+```
+
+### Self-hosted / CLI Users
+
+For small instances, the CLI handles backfill directly:
+
+```
+$ cargo run --bin ulog_convert reanalyze \
+    --storage s3://my-bucket/logs \
+    --db postgres://localhost/flight_review \
+    --concurrency 4
+```
+
+This iterates logs where `analysis_version < CURRENT`, fetches each `.ulg` from
+storage, re-runs `analyze()`, writes updated `metadata.json` back to storage,
+updates the DB record and `log_diagnostics` rows, and sets the new version.
+Resumable — it picks up where it left off on restart.
+
+### logs.px4.io (Production Scale)
+
+At production scale, reprocessing must not compete with live uploads for CPU,
+I/O, or database connections. The backfill runs on **separate compute**:
+
+```
+┌──────────────────────┐       ┌──────────────────────┐
+│   Serving Instance   │       │   Backfill Worker     │
+│                      │       │                       │
+│  POST /api/upload    │       │  Triggered by:        │
+│  GET  /api/logs      │       │  - deploy to main     │
+│                      │       │  - manual invocation   │
+│  Writes new logs to  │       │                       │
+│  S3 + RDS            │       │  Reads .ulg from S3   │
+│                      │       │  Re-runs analyze()    │
+│                      │       │  Writes metadata.json │
+│                      │       │  Updates RDS          │
+└──────┬───────────────┘       └──────┬────────────────┘
+       │                              │
+       │        ┌─────────┐           │
+       └───────►│   S3    │◄──────────┘
+       │        └─────────┘           │
+       │        ┌─────────┐           │
+       └───────►│   RDS   │◄──────────┘
+                └─────────┘
+```
+
+**Trigger:** A push to `main` that touches `crates/converter/src/diagnostics/`
+or bumps `ANALYSIS_VERSION`. This can be an EventBridge rule, a GitHub Actions
+workflow that launches an EC2 spot instance, or a simple cron job that checks
+the version.
+
+**The worker binary** is the same converter crate compiled as a batch tool — no
+new code, just a different entry point:
+
+```
+$ flight-review-worker reanalyze \
+    --storage s3://logs-px4-io/files \
+    --db postgres://rds-endpoint/flight_review \
+    --concurrency 8 \
+    --batch-size 100 \
+    --throttle-ms 50
+```
+
+Key properties:
+
+- **Resumable.** Queries `WHERE analysis_version < CURRENT ORDER BY created_at`
+  and processes in batches. If it crashes, the next run continues from where it
+  stopped — logs already at the current version are skipped.
+- **Throttled.** Configurable concurrency and inter-batch delay so it doesn't
+  saturate RDS connections or S3 request rates.
+- **Isolated.** Runs on its own EC2 instance (spot is fine — resumability makes
+  interruptions cheap). Zero impact on serving latency.
+- **Observable.** Logs progress to stdout/CloudWatch: total logs, processed,
+  remaining, errors, elapsed time.
+
+### What the Serving Instance Does NOT Do
+
+The serving instance never re-analyzes on read. `GET /api/logs/{id}` returns
+whatever `metadata.json` is in S3, even if it was generated with an older
+analysis version. The backfill worker is the only thing that updates historical
+logs. This keeps the read path fast and predictable.
+
 ## What's NOT In Scope
 
 - Python, Pandas, or any non-Rust runtime dependency
 - External service calls during the upload path
 - ML model training during upload (inference only)
 - Changes to the Parquet storage format
-- Separate microservices or job queues
