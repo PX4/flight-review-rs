@@ -24,5 +24,9 @@ fn bench_convert(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_convert);
+criterion_group! {
+    name = benches;
+    config = Criterion::default().without_plots();
+    targets = bench_convert
+}
 criterion_main!(benches);
