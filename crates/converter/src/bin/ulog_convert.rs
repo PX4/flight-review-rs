@@ -11,6 +11,16 @@ enum OutputFormat {
     Compact,
 }
 
+#[derive(Debug, Clone, ValueEnum)]
+enum ScanFormat {
+    /// Human-readable summary table (default)
+    Table,
+    /// One JSON object per file, one per line
+    Json,
+    /// Pretty-printed JSON per file
+    JsonPretty,
+}
+
 #[derive(Parser)]
 #[command(name = "ulog-convert", version, about = "Convert ULog files to Parquet + metadata")]
 struct Cli {
@@ -58,9 +68,9 @@ enum Command {
         #[arg(long, short)]
         jobs: Option<usize>,
 
-        /// Output format: pretty or compact JSON
-        #[arg(long, value_enum, default_value_t = OutputFormat::Compact)]
-        output_format: OutputFormat,
+        /// Output format: table, json, or json-pretty
+        #[arg(long, value_enum, default_value_t = ScanFormat::Table)]
+        output_format: ScanFormat,
     },
 }
 
@@ -242,7 +252,7 @@ struct ScanResult {
     error: Option<String>,
 }
 
-fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs: Option<usize>, format: &OutputFormat) {
+fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs: Option<usize>, format: &ScanFormat) {
     // Collect all .ulg files
     let files: Vec<String> = walkdir::WalkDir::new(dir)
         .into_iter()
@@ -261,7 +271,7 @@ fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs:
     }
 
     let total = files.len();
-    eprintln!("Scanning {} ULog files...", total);
+    eprintln!("Scanning {} ULog files...\n", total);
 
     if let Some(j) = jobs {
         rayon::ThreadPoolBuilder::new()
@@ -287,9 +297,9 @@ fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs:
                 with_diags.fetch_add(1, Ordering::Relaxed);
             }
 
-            // Progress on stderr every 50 files
-            if n % 50 == 0 || n == total {
-                eprintln!("  [{}/{}] processed", n, total);
+            // Progress on stderr every 100 files
+            if n % 100 == 0 || n == total {
+                eprint!("\r  [{n}/{total}] processed");
             }
 
             if diagnostics_only && result.diagnostics.is_empty() && result.error.is_none() {
@@ -300,19 +310,115 @@ fn run_scan(dir: &str, diagnostics_only: bool, analyzer_filter: &[String], jobs:
         })
         .collect();
 
+    eprintln!();
+
     // Output results
-    for r in &results {
-        let json = match format {
-            OutputFormat::Pretty => serde_json::to_string_pretty(r).unwrap(),
-            OutputFormat::Compact => serde_json::to_string(r).unwrap(),
-        };
-        println!("{}", json);
+    match format {
+        ScanFormat::Table => print_table(&results),
+        ScanFormat::Json => {
+            for r in &results {
+                println!("{}", serde_json::to_string(r).unwrap());
+            }
+        }
+        ScanFormat::JsonPretty => {
+            for r in &results {
+                println!("{}", serde_json::to_string_pretty(r).unwrap());
+            }
+        }
     }
 
-    // Summary on stderr
+    // Summary
     let diag_count = with_diags.load(Ordering::Relaxed);
     let err_count = errors.load(Ordering::Relaxed);
-    eprintln!("\nSummary: {total} files scanned, {diag_count} with diagnostics, {err_count} errors");
+    eprintln!("\n{total} files scanned, {diag_count} with diagnostics, {err_count} errors");
+}
+
+fn print_table(results: &[ScanResult]) {
+    if results.is_empty() {
+        println!("No results.");
+        return;
+    }
+
+    println!(
+        "{:<44} {:<16} {:<10} DIAGNOSTICS",
+        "FILE", "VEHICLE", "HARDWARE"
+    );
+    println!("{}", "-".repeat(110));
+
+    for r in results {
+        if let Some(ref err) = r.error {
+            println!(
+                "{:<44} {:<16} {:<10} ERROR: {}",
+                truncate_path(&r.file, 44),
+                r.vehicle.as_deref().unwrap_or("-"),
+                r.hardware.as_deref().unwrap_or("-"),
+                err,
+            );
+            continue;
+        }
+
+        if r.diagnostics.is_empty() {
+            println!(
+                "{:<44} {:<16} {:<10} -",
+                truncate_path(&r.file, 44),
+                r.vehicle.as_deref().unwrap_or("-"),
+                r.hardware.as_deref().unwrap_or("-"),
+            );
+            continue;
+        }
+
+        // Group diagnostics by id with count
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for d in &r.diagnostics {
+            if let Some(entry) = counts.iter_mut().find(|(id, _)| id == &d.id) {
+                entry.1 += 1;
+            } else {
+                counts.push((d.id.clone(), 1));
+            }
+        }
+
+        let diag_str: Vec<String> = counts
+            .iter()
+            .map(|(id, n)| {
+                if *n > 1 {
+                    format!("{id}({n})")
+                } else {
+                    id.clone()
+                }
+            })
+            .collect();
+
+        // Color severity: find worst
+        let worst = if r.diagnostics.iter().any(|d| {
+            matches!(d.severity, flight_review::diagnostics::Severity::Critical)
+        }) {
+            "!"
+        } else {
+            " "
+        };
+
+        println!(
+            "{:<44} {:<16} {:<10} {worst} {}",
+            truncate_path(&r.file, 44),
+            r.vehicle.as_deref().unwrap_or("-"),
+            r.hardware.as_deref().unwrap_or("-"),
+            diag_str.join(", "),
+        );
+    }
+}
+
+fn truncate_path(path: &str, max_len: usize) -> String {
+    if path.len() <= max_len {
+        return path.to_string();
+    }
+    // Show .../<last two components>
+    let parts: Vec<&str> = path.rsplit('/').take(2).collect();
+    let short = format!(".../{}", parts.into_iter().rev().collect::<Vec<_>>().join("/"));
+    if short.len() <= max_len {
+        short
+    } else {
+        format!("...{}", &path[path.len() - (max_len - 3)..])
+    }
 }
 
 fn scan_one_file(path: &str, analyzer_filter: &[String]) -> ScanResult {
