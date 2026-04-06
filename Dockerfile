@@ -6,15 +6,15 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-# Build release binary
-RUN cargo build --release -p flight-review-server \
+# Build release binary with PostgreSQL support
+RUN cargo build --release -p flight-review-server --features postgres \
     && cargo build --release -p flight-review --bin ulog-convert
 
 # Runtime image — minimal, no Rust toolchain
 FROM debian:bookworm-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/flight-review-server /usr/local/bin/

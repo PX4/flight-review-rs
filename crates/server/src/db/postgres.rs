@@ -161,10 +161,10 @@ impl PostgresStore {
             .connect(url)
             .await?;
 
-        sqlx::query(CREATE_TABLE).execute(&pool).await?;
+        sqlx::raw_sql(CREATE_TABLE).execute(&pool).await?;
 
         // Create junction tables for parameters, topics, tags, errors.
-        sqlx::query(CREATE_JUNCTION_TABLES).execute(&pool).await?;
+        sqlx::raw_sql(CREATE_JUNCTION_TABLES).execute(&pool).await?;
 
         // Migrate: add new columns to existing tables (idempotent).
         for col_sql in ALTER_COLUMNS {
