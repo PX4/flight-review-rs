@@ -9,7 +9,7 @@ keywords = ["px4", "ulog", "parquet", "flight-review", "drone"]
 categories = ["science", "command-line-utilities", "parser-implementations"]
 
 [dependencies]
-px4-ulog = { git = "https://github.com/mrpollo/px4-ulog-rs.git", branch = "test/comprehensive-test-coverage" }
+px4-ulog = { git = "https://github.com/PX4/px4-ulog-rs.git" }
 arrow = "54"
 parquet = { version = "54", features = ["arrow"] }
 serde = { version = "1", features = ["derive"] }
