@@ -3,7 +3,7 @@
 	import uPlot from 'uplot';
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
 	import { activePlots, togglePlotMinimized } from '$lib/stores/logViewer';
-	import { timeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
+	import { timeRange, setTimeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
 	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 	import { touchZoomPlugin } from '$lib/utils/uplotTouchZoom';
 
@@ -33,6 +33,11 @@
 
 	// Guard against infinite loops when syncing scales
 	let settingScale = false;
+
+	// Track whether this plot is visible in the viewport
+	let isVisible = $state(true);
+	let pendingSyncRange: [number, number] | null = null;
+	let intersectionObserver: IntersectionObserver | null = null;
 
 	// Track the fields key to detect changes
 	let lastFieldsKey = '';
@@ -124,7 +129,7 @@
 							const min = u.scales.x.min;
 							const max = u.scales.x.max;
 							if (min != null && max != null) {
-								timeRange.set([min, max]);
+								setTimeRange(min, max);
 							}
 						},
 					],
@@ -159,7 +164,31 @@
 		}
 	}
 
+	function applyPendingRange() {
+		if (!uplot || !pendingSyncRange) return;
+		settingScale = true;
+		uplot.setScale('x', { min: pendingSyncRange[0], max: pendingSyncRange[1] });
+		settingScale = false;
+		pendingSyncRange = null;
+	}
+
 	onMount(() => {
+		// Track visibility to skip off-screen redraws
+		if (containerEl) {
+			intersectionObserver = new IntersectionObserver(
+				(entries) => {
+					for (const entry of entries) {
+						isVisible = entry.isIntersecting;
+						if (isVisible) {
+							applyPendingRange();
+						}
+					}
+				},
+				{ rootMargin: '100px' } // slight margin so plots update just before scrolling into view
+			);
+			intersectionObserver.observe(containerEl);
+		}
+
 		// Setup resize observer
 		if (containerEl) {
 			resizeObserver = new ResizeObserver((entries) => {
@@ -191,15 +220,22 @@
 		}
 	});
 
-	// React to timeRange changes from other plots
+	// React to timeRange changes from other plots.
+	// Off-screen plots stash the range and apply it when they become visible.
 	$effect(() => {
 		const range = $timeRange;
 		if (!uplot || settingScale) return;
+
+		if (!isVisible) {
+			// Stash for later — will be applied when plot scrolls into view
+			pendingSyncRange = range ? [range[0], range[1]] : null;
+			return;
+		}
+
 		settingScale = true;
 		if (range) {
 			uplot.setScale('x', { min: range[0], max: range[1] });
 		} else {
-			// Reset zoom: let uPlot auto-fit to full data range
 			const data = uplot.data;
 			if (data && data[0] && data[0].length > 0) {
 				uplot.setScale('x', { min: data[0][0], max: data[0][data[0].length - 1] });
@@ -216,6 +252,10 @@
 		if (resizeObserver) {
 			resizeObserver.disconnect();
 			resizeObserver = null;
+		}
+		if (intersectionObserver) {
+			intersectionObserver.disconnect();
+			intersectionObserver = null;
 		}
 	});
 </script>

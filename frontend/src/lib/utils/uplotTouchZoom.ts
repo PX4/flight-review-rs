@@ -1,5 +1,6 @@
 /**
- * uPlot touch-zoom plugin — pinch-to-zoom and single-finger pan on the x-axis.
+ * uPlot touch-zoom plugin — pinch-to-zoom and single-finger pan on the x-axis,
+ * plus Shift+scroll to zoom and Shift+drag to pan on desktop.
  *
  * Adapted from the official uPlot zoom-touch demo by Leon Sorokin:
  * https://github.com/leeoniya/uPlot/blob/master/demos/zoom-touch.html
@@ -7,6 +8,7 @@
  * Changes from original:
  * - X-axis only (y-axis is left untouched)
  * - TypeScript types
+ * - Desktop: Shift+wheel zoom, Shift+drag pan
  * - Cleanup on destroy
  */
 
@@ -58,16 +60,14 @@ export function touchZoomPlugin(): uPlot.Plugin {
 			}
 		}
 
+		// --- Touch: pinch-to-zoom and single-finger pan ---
+
 		let rafPending = false;
 
 		function zoom() {
 			rafPending = false;
 
 			const left = to.x;
-
-			// For single-finger pan: d stays 1, so xFactor = 1 — only the
-			// position shift (leftPct difference) moves the viewport.
-			// For pinch: d changes, producing a zoom factor.
 			const xFactor = fr.d / to.d;
 			const leftPct = left / rect.width;
 
@@ -104,8 +104,105 @@ export function touchZoomPlugin(): uPlot.Plugin {
 		over.addEventListener('touchstart', touchstart, { passive: true });
 		over.addEventListener('touchend', touchend);
 
+		// --- Desktop: Shift+wheel to zoom ---
+
+		let wheelRafPending = false;
+		let wheelAccum = 0;
+		let wheelCursorPct = 0.5;
+
+		function applyWheelZoom() {
+			wheelRafPending = false;
+
+			const xRange = (u.scales.x.max ?? 0) - (u.scales.x.min ?? 0);
+			// Each ~100px of wheel delta = 20% zoom
+			const factor = Math.pow(1.2, wheelAccum / 100);
+			wheelAccum = 0;
+
+			const nxRange = xRange * factor;
+			const xMin = u.scales.x.min ?? 0;
+			// Keep the point under the cursor fixed
+			const nxMin = xMin + (xRange - nxRange) * wheelCursorPct;
+			const nxMax = nxMin + nxRange;
+
+			u.setScale('x', { min: nxMin, max: nxMax });
+		}
+
+		function onWheel(e: WheelEvent) {
+			if (!e.shiftKey) return;
+
+			e.preventDefault();
+
+			rect = over.getBoundingClientRect();
+			wheelCursorPct = (e.clientX - rect.left) / rect.width;
+			// macOS swaps deltaY to deltaX when Shift is held
+			const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+			wheelAccum += delta;
+
+			if (!wheelRafPending) {
+				wheelRafPending = true;
+				requestAnimationFrame(applyWheelZoom);
+			}
+		}
+
+		over.addEventListener('wheel', onWheel, { passive: false });
+
+		// --- Desktop: Shift+drag to pan ---
+
+		let dragging = false;
+		let dragStartX = 0;
+		let dragOxMin = 0;
+		let dragOxMax = 0;
+		let dragRafPending = false;
+		let dragCurrentX = 0;
+
+		function applyDragPan() {
+			dragRafPending = false;
+
+			rect = over.getBoundingClientRect();
+			const dx = dragCurrentX - dragStartX;
+			const xRange = dragOxMax - dragOxMin;
+			const shift = -(dx / rect.width) * xRange;
+
+			u.setScale('x', { min: dragOxMin + shift, max: dragOxMax + shift });
+		}
+
+		function onMouseDown(e: MouseEvent) {
+			if (!e.shiftKey || e.button !== 0) return;
+
+			e.preventDefault();
+			// Suppress uPlot's built-in cursor drag while we're panning
+			over.style.pointerEvents = 'none';
+
+			dragging = true;
+			dragStartX = e.clientX;
+			dragOxMin = u.scales.x.min ?? 0;
+			dragOxMax = u.scales.x.max ?? 0;
+
+			document.addEventListener('mousemove', onMouseMove);
+			document.addEventListener('mouseup', onMouseUp);
+		}
+
+		function onMouseMove(e: MouseEvent) {
+			if (!dragging) return;
+
+			dragCurrentX = e.clientX;
+			if (!dragRafPending) {
+				dragRafPending = true;
+				requestAnimationFrame(applyDragPan);
+			}
+		}
+
+		function onMouseUp() {
+			dragging = false;
+			over.style.pointerEvents = '';
+			document.removeEventListener('mousemove', onMouseMove);
+			document.removeEventListener('mouseup', onMouseUp);
+		}
+
+		over.addEventListener('mousedown', onMouseDown);
+
 		// Store refs for cleanup
-		(u as any)._touchZoom = { touchstart, touchend };
+		(u as any)._touchZoom = { touchstart, touchend, onWheel, onMouseDown };
 	}
 
 	function destroy(u: uPlot) {
@@ -113,6 +210,8 @@ export function touchZoomPlugin(): uPlot.Plugin {
 		if (refs) {
 			u.over.removeEventListener('touchstart', refs.touchstart);
 			u.over.removeEventListener('touchend', refs.touchend);
+			u.over.removeEventListener('wheel', refs.onWheel);
+			u.over.removeEventListener('mousedown', refs.onMouseDown);
 		}
 	}
 
