@@ -61,9 +61,10 @@
 	}
 </script>
 
-<div class="flex flex-col gap-4">
+<div role="list" class="flex flex-col gap-4">
 	{#each plots as plot, i (plot.id)}
 		<div
+			role="listitem"
 			class="relative transition-opacity duration-150"
 			class:opacity-50={dragFromIndex === i}
 			ondragover={handleDragOver(i)}

@@ -104,7 +104,7 @@
 			const initialBounds = getBounds();
 			map = new mb.Map({
 				container: mapContainer,
-				style: 'mapbox://styles/mapbox/outdoors-v12',
+				style: 'mapbox://styles/mapbox/satellite-streets-v12',
 				attributionControl: true,
 				...(initialBounds ? { bounds: initialBounds, fitBoundsOptions: { padding: 100, maxZoom: 16 } } : {}),
 			});

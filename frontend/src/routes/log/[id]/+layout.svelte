@@ -124,7 +124,7 @@
 
 		<!-- Sticky header: summary + flight modes + tab bar -->
 		<div class="sticky top-0 z-30 bg-white shadow-sm">
-			<FlightSummaryHeader {metadata} logId={logRecord.id} vehicleType={logRecord.vehicle_type} locationName={logRecord.location_name} />
+			<FlightSummaryHeader {metadata} logId={logRecord.id} vehicleType={logRecord.vehicle_type} locationName={logRecord.location_name} filename={logRecord.filename} createdAt={logRecord.created_at} />
 
 			{#if metadata.analysis?.flight_modes && metadata.analysis.flight_modes.length > 0}
 				<FlightModeTimeline segments={metadata.analysis.flight_modes} />
