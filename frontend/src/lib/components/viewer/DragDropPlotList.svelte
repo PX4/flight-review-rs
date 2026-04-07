@@ -3,6 +3,7 @@
 	import { reorderPlots } from '$lib/stores/logViewer';
 	import PlotStrip from './PlotStrip.svelte';
 	import TrajectoryPlot from './TrajectoryPlot.svelte';
+	import SpectrogramPlot from './SpectrogramPlot.svelte';
 	import LazyPlot from './LazyPlot.svelte';
 
 	let { plots, logId, metadata } = $props<{
@@ -78,6 +79,18 @@
 			<LazyPlot>
 				{#if plot.kind === 'xy'}
 					<TrajectoryPlot
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{:else if plot.kind === 'spectrogram'}
+					<SpectrogramPlot
 						config={plot}
 						{logId}
 						{metadata}

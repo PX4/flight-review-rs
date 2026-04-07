@@ -69,6 +69,7 @@
 	];
 
 	const TRAJECTORY_PLOT_ID = 'trajectory_2d';
+	const ACCEL_SPECTROGRAM_ID = 'accel_spectrogram';
 
 	function makeTrajectoryPlot(): PlotConfig {
 		return {
@@ -79,6 +80,18 @@
 			yLabel: '2D Trajectory',
 			colors: [],
 			kind: 'xy',
+		};
+	}
+
+	function makeAccelSpectrogramPlot(): PlotConfig {
+		return {
+			id: ACCEL_SPECTROGRAM_ID,
+			topic: 'sensor_combined',
+			multiId: 0,
+			fields: [],
+			yLabel: 'Acceleration Power Spectral Density',
+			colors: [],
+			kind: 'spectrogram',
 		};
 	}
 
@@ -104,6 +117,12 @@
 			});
 		}
 
+		// Acceleration spectrogram appended after the time-series defaults so it
+		// doesn't push the more commonly inspected plots below the fold.
+		if (availableTopics.has('sensor_combined')) {
+			plots.push(makeAccelSpectrogramPlot());
+		}
+
 		return plots;
 	}
 
@@ -124,6 +143,13 @@
 						!valid.some((p) => p.id === TRAJECTORY_PLOT_ID)
 					) {
 						valid.unshift(makeTrajectoryPlot());
+					}
+					// Append the spectrogram if missing.
+					if (
+						availableTopics.has('sensor_combined') &&
+						!valid.some((p) => p.id === ACCEL_SPECTROGRAM_ID)
+					) {
+						valid.push(makeAccelSpectrogramPlot());
 					}
 					activePlots.set(valid);
 				} else {

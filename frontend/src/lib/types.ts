@@ -212,6 +212,7 @@ export interface PlotConfig {
   colors: string[];
   minimized?: boolean;
   /** Plot rendering kind. 'timeseries' (default) plots fields vs time;
-   *  'xy' is a special trajectory/scatter plot with hardcoded topics. */
-  kind?: 'timeseries' | 'xy';
+   *  'xy' is a special trajectory/scatter plot with hardcoded topics;
+   *  'spectrogram' is a PSD heatmap with hardcoded topics. */
+  kind?: 'timeseries' | 'xy' | 'spectrogram';
 }
