@@ -68,9 +68,28 @@
 		['cpu', 'cpuload', 0, ['load', 'ram_usage'], 'CPU Load'],
 	];
 
+	const TRAJECTORY_PLOT_ID = 'trajectory_2d';
+
+	function makeTrajectoryPlot(): PlotConfig {
+		return {
+			id: TRAJECTORY_PLOT_ID,
+			topic: 'vehicle_local_position',
+			multiId: 0,
+			fields: [],
+			yLabel: '2D Trajectory',
+			colors: [],
+			kind: 'xy',
+		};
+	}
+
 	function buildDefaultPlots(metadata: FlightMetadata): PlotConfig[] {
 		const availableTopics = new Set(Object.keys(metadata.topics));
 		const plots: PlotConfig[] = [];
+
+		// Trajectory plot is always first when local position data is available.
+		if (availableTopics.has('vehicle_local_position')) {
+			plots.push(makeTrajectoryPlot());
+		}
 
 		for (const [id, topic, multiId, fields, yLabel] of DEFAULT_PLOTS) {
 			if (!availableTopics.has(topic)) continue;
@@ -98,6 +117,14 @@
 			if (saved && saved.length > 0) {
 				const valid = saved.filter((p) => availableTopics.has(p.topic));
 				if (valid.length > 0) {
+					// Prepend the trajectory plot if missing from saved layout (so existing
+					// users pick up the new default the first time they reopen a log).
+					if (
+						availableTopics.has('vehicle_local_position') &&
+						!valid.some((p) => p.id === TRAJECTORY_PLOT_ID)
+					) {
+						valid.unshift(makeTrajectoryPlot());
+					}
 					activePlots.set(valid);
 				} else {
 					activePlots.set(buildDefaultPlots(ctx.metadata));

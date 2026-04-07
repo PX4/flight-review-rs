@@ -2,6 +2,7 @@
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
 	import { reorderPlots } from '$lib/stores/logViewer';
 	import PlotStrip from './PlotStrip.svelte';
+	import TrajectoryPlot from './TrajectoryPlot.svelte';
 	import LazyPlot from './LazyPlot.svelte';
 
 	let { plots, logId, metadata } = $props<{
@@ -75,17 +76,31 @@
 				<div class="absolute -top-px left-0 right-0 h-0.5 bg-blue-500 z-10 rounded-full"></div>
 			{/if}
 			<LazyPlot>
-				<PlotStrip
-					config={plot}
-					{logId}
-					{metadata}
-					index={i}
-					totalCount={plots.length}
-					onMoveUp={() => moveUp(i)}
-					onMoveDown={() => moveDown(i)}
-					onDragStart={handleDragStart(i)}
-					onDragEnd={handleDragEnd}
-				/>
+				{#if plot.kind === 'xy'}
+					<TrajectoryPlot
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{:else}
+					<PlotStrip
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{/if}
 			</LazyPlot>
 		</div>
 	{/each}
