@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320" font-family="-apple-system, Segoe UI, Helvetica, Arial, sans-serif" font-size="14">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <linearGradient id="stream" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0" stop-color="#e0f2fe"/>
+      <stop offset="1" stop-color="#bae6fd"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="900" height="320" fill="#ffffff"/>
+
+  <!-- ULog source -->
+  <rect x="20" y="120" width="140" height="70" rx="10" fill="url(#stream)" stroke="#0284c7" stroke-width="1.5"/>
+  <text x="90" y="150" text-anchor="middle" font-weight="600" fill="#0c4a6e">ULog stream</text>
+  <text x="90" y="170" text-anchor="middle" fill="#0c4a6e" font-size="12">timestamp-ordered</text>
+
+  <!-- analyze() pass -->
+  <rect x="200" y="120" width="170" height="70" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5"/>
+  <text x="285" y="148" text-anchor="middle" font-weight="600" fill="#0f172a">analyze() pass</text>
+  <text x="285" y="168" text-anchor="middle" fill="#475569" font-size="12">single streaming walk</text>
+
+  <!-- Dispatch fan-out -->
+  <circle cx="430" cy="155" r="10" fill="#fde68a" stroke="#b45309" stroke-width="1.5"/>
+  <text x="430" y="135" text-anchor="middle" font-size="11" fill="#78350f">dispatch</text>
+  <text x="430" y="185" text-anchor="middle" font-size="11" fill="#78350f">by topic</text>
+
+  <!-- Analyzers -->
+  <g>
+    <rect x="490" y="30" width="200" height="54" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+    <text x="590" y="52" text-anchor="middle" font-weight="600" fill="#064e3b">Analyzer A</text>
+    <text x="590" y="70" text-anchor="middle" font-size="11" fill="#065f46">required_topics() = ["x"]</text>
+  </g>
+  <g>
+    <rect x="490" y="128" width="200" height="54" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+    <text x="590" y="150" text-anchor="middle" font-weight="600" fill="#064e3b">Analyzer B</text>
+    <text x="590" y="168" text-anchor="middle" font-size="11" fill="#065f46">required_topics() = ["y","z"]</text>
+  </g>
+  <g>
+    <rect x="490" y="226" width="200" height="54" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+    <text x="590" y="248" text-anchor="middle" font-weight="600" fill="#064e3b">Analyzer C</text>
+    <text x="590" y="266" text-anchor="middle" font-size="11" fill="#065f46">on_message(DataMessage)</text>
+  </g>
+
+  <!-- Collector / finish -->
+  <rect x="730" y="120" width="150" height="70" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="1.5"/>
+  <text x="805" y="148" text-anchor="middle" font-weight="600" fill="#78350f">finish()</text>
+  <text x="805" y="168" text-anchor="middle" font-size="12" fill="#78350f">Vec&lt;Diagnostic&gt;</text>
+
+  <!-- Arrows -->
+  <line x1="160" y1="155" x2="200" y2="155" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="370" y1="155" x2="418" y2="155" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="442" y1="150" x2="490" y2="57" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="442" y1="155" x2="490" y2="155" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="442" y1="160" x2="490" y2="253" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="690" y1="57" x2="735" y2="140" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="690" y1="155" x2="730" y2="155" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+  <line x1="690" y1="253" x2="735" y2="170" stroke="#334155" stroke-width="1.8" marker-end="url(#arrow)"/>
+
+  <!-- Footer note -->
+  <text x="450" y="305" text-anchor="middle" font-size="12" fill="#64748b">Each message is delivered once, in order, only to analyzers whose required_topics() match.</text>
+</svg>
