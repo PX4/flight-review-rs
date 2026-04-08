@@ -544,21 +544,9 @@ curl "http://localhost:8080/api/logs?diagnostic_severity=critical"
 
 ### Adding a New Analyzer
 
-1. Create `crates/converter/src/diagnostics/your_analyzer.rs`
-2. Add a variant to the `Evidence` enum in `mod.rs`
-3. Implement the `Analyzer` trait (`id`, `description`, `required_topics`, `on_message`, `finish`)
-4. Register in `create_analyzers()` and declare with `pub mod`
-5. Add a real-world `.ulg` fixture in `tests/fixtures/` that exhibits the failure
-6. Write tests following the required pattern (see `testing.rs`):
-   - No false positives on `sample.ulg`
-   - Detection on real-world fixture
-   - Detection on synthetic data via `MessageBuilder`
-   - Missing fields don't panic
-   - Deduplication
-   - `insta` snapshot test
-7. Run `cargo bench` and include results in the PR
+See the full contributor guide at [`crates/converter/src/diagnostics/CONTRIBUTING.md`](crates/converter/src/diagnostics/CONTRIBUTING.md). It walks through the five steps (add an `Evidence` variant, create the analyzer file, register it, write the required tests, run the CI gates locally), includes a copy-pasteable skeleton, and points at [`rc_loss.rs`](crates/converter/src/diagnostics/rc_loss.rs) as the shortest complete reference implementation.
 
-CI (`diagnostics.yml`) validates all of this automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
+CI (`diagnostics.yml`) validates the pattern automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
 
 ## For Researchers
 
