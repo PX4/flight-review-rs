@@ -1,9 +1,23 @@
 <script lang="ts">
 	import type { FlightMetadata } from '$lib/types';
-	import { formatDuration } from '$lib/utils/formatters';
+	import { formatDuration, parseFlightDateFromFilename, formatFlightDateTime } from '$lib/utils/formatters';
 	import { getHardwareName } from '$lib/utils/hardwareNames';
 
-	let { metadata, logId, vehicleType, locationName } = $props<{ metadata: FlightMetadata; logId: string; vehicleType?: string | null; locationName?: string | null }>();
+	let { metadata, logId, vehicleType, locationName, filename, createdAt } = $props<{ metadata: FlightMetadata; logId: string; vehicleType?: string | null; locationName?: string | null; filename?: string | null; createdAt?: string | null }>();
+
+	// Flight date: prefer filename (PX4 encodes flight time), fall back to upload time.
+	const flightDate = $derived.by(() => {
+		const fromName = parseFlightDateFromFilename(filename);
+		if (fromName) return { date: fromName, source: 'flight' as const };
+		if (createdAt) {
+			const d = new Date(createdAt);
+			if (!isNaN(d.getTime())) return { date: d, source: 'upload' as const };
+		}
+		return null;
+	});
+	const flightDateParts = $derived(flightDate ? formatFlightDateTime(flightDate.date) : null);
+	const flightDateLabel = $derived(flightDate?.source === 'upload' ? 'Uploaded' : 'Flight Date');
+	const flightDateTooltip = $derived(flightDate ? flightDate.date.toLocaleString() : '');
 
 	// Parse location_name: "City, Country [CC]" → { city, country, countryCode, flag }
 	const location = $derived.by(() => {
@@ -91,6 +105,12 @@
 				<dd class="text-xs text-gray-400 whitespace-nowrap">No Location</dd>
 			{/if}
 		</div>
+		{#if flightDateParts}
+			<div class="shrink-0 px-3 py-1.5" title={flightDateTooltip}>
+				<dt class="text-[10px] text-gray-500">{flightDateLabel}</dt>
+				<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{flightDateParts.date} <span class="text-gray-500">{flightDateParts.time}</span></dd>
+			</div>
+		{/if}
 		<div class="shrink-0 px-3 py-1.5">
 			<dt class="text-[10px] text-gray-500">Hardware</dt>
 			<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{getHardwareName(metadata.ver_hw)}</dd>
@@ -163,6 +183,12 @@
 				<dd class="text-sm text-gray-400 whitespace-nowrap">No Location</dd>
 			{/if}
 		</div>
+		{#if flightDateParts}
+			<div class="px-2 lg:px-4 py-2 lg:py-3" title={flightDateTooltip}>
+				<dt class="text-xs text-gray-500">{flightDateLabel}</dt>
+				<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{flightDateParts.date} <span class="text-gray-500">{flightDateParts.time}</span></dd>
+			</div>
+		{/if}
 		<div class="px-2 lg:px-4 py-2 lg:py-3">
 			<dt class="text-xs text-gray-500">Hardware</dt>
 			<dd class="text-sm font-medium text-gray-700 mt-0.5 truncate" title={metadata.ver_hw ?? ''}>{getHardwareName(metadata.ver_hw)}</dd>

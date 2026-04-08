@@ -17,7 +17,7 @@
 	type SortKey = 'name' | 'value' | 'default' | 'delta';
 	type SortDir = 'asc' | 'desc';
 
-	let viewMode = $state<ViewMode>(diffs.length > 0 ? 'non-default' : 'all');
+	let viewMode = $state<ViewMode>('non-default');
 	let sortKey = $state<SortKey>('name');
 	let sortDir = $state<SortDir>('asc');
 	let searchText = $state('');

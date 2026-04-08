@@ -12,6 +12,7 @@
 	import FlightSummaryHeader from '$lib/components/viewer/FlightSummaryHeader.svelte';
 	import FlightModeTimeline from '$lib/components/viewer/FlightModeTimeline.svelte';
 	import PlotBuilderPanel from '$lib/components/viewer/PlotBuilderPanel.svelte';
+	import { buildQgcParamsFile, downloadTextFile } from '$lib/utils/paramExport';
 
 	let { children } = $props<{ children: Snippet }>();
 
@@ -94,6 +95,14 @@
 	function resetZoom() {
 		timeRange.set(null);
 	}
+
+	function downloadParams() {
+		if (!metadata?.parameters || !logRecord) return;
+		const content = buildQgcParamsFile(metadata.parameters, { sysName: metadata.sys_name });
+		// Strip any extension from the source filename and append `.params`.
+		const base = logRecord.filename?.replace(/\.[^.]+$/, '') || logRecord.id;
+		downloadTextFile(`${base}.params`, content);
+	}
 </script>
 
 <svelte:head>
@@ -124,7 +133,7 @@
 
 		<!-- Sticky header: summary + flight modes + tab bar -->
 		<div class="sticky top-0 z-30 bg-white shadow-sm">
-			<FlightSummaryHeader {metadata} logId={logRecord.id} vehicleType={logRecord.vehicle_type} locationName={logRecord.location_name} />
+			<FlightSummaryHeader {metadata} logId={logRecord.id} vehicleType={logRecord.vehicle_type} locationName={logRecord.location_name} filename={logRecord.filename} createdAt={logRecord.created_at} />
 
 			{#if metadata.analysis?.flight_modes && metadata.analysis.flight_modes.length > 0}
 				<FlightModeTimeline segments={metadata.analysis.flight_modes} />
@@ -164,6 +173,19 @@
 										<path stroke-linecap="round" stroke-linejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5l5.25 5.25" />
 									</svg>
 									<span class="hidden sm:inline">Reset Zoom</span>
+								</button>
+							{/if}
+							{#if activeTab === '/parameters'}
+								<button
+									class="flex items-center gap-1.5 rounded-md bg-indigo-600 px-2 sm:px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+									onclick={downloadParams}
+									disabled={!metadata?.parameters || Object.keys(metadata.parameters).length === 0}
+									title="Download parameters as QGroundControl .params file"
+								>
+									<svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+										<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12M12 16.5V3" />
+									</svg>
+									<span class="hidden lg:inline">Download .params</span>
 								</button>
 							{/if}
 						</div>

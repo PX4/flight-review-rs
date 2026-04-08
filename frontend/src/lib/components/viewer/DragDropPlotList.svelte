@@ -2,6 +2,8 @@
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
 	import { reorderPlots } from '$lib/stores/logViewer';
 	import PlotStrip from './PlotStrip.svelte';
+	import TrajectoryPlot from './TrajectoryPlot.svelte';
+	import SpectrogramPlot from './SpectrogramPlot.svelte';
 	import LazyPlot from './LazyPlot.svelte';
 
 	let { plots, logId, metadata } = $props<{
@@ -61,9 +63,10 @@
 	}
 </script>
 
-<div class="flex flex-col gap-4">
+<div role="list" class="flex flex-col gap-4">
 	{#each plots as plot, i (plot.id)}
 		<div
+			role="listitem"
 			class="relative transition-opacity duration-150"
 			class:opacity-50={dragFromIndex === i}
 			ondragover={handleDragOver(i)}
@@ -74,17 +77,43 @@
 				<div class="absolute -top-px left-0 right-0 h-0.5 bg-blue-500 z-10 rounded-full"></div>
 			{/if}
 			<LazyPlot>
-				<PlotStrip
-					config={plot}
-					{logId}
-					{metadata}
-					index={i}
-					totalCount={plots.length}
-					onMoveUp={() => moveUp(i)}
-					onMoveDown={() => moveDown(i)}
-					onDragStart={handleDragStart(i)}
-					onDragEnd={handleDragEnd}
-				/>
+				{#if plot.kind === 'xy'}
+					<TrajectoryPlot
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{:else if plot.kind === 'spectrogram'}
+					<SpectrogramPlot
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{:else}
+					<PlotStrip
+						config={plot}
+						{logId}
+						{metadata}
+						index={i}
+						totalCount={plots.length}
+						onMoveUp={() => moveUp(i)}
+						onMoveDown={() => moveDown(i)}
+						onDragStart={handleDragStart(i)}
+						onDragEnd={handleDragEnd}
+					/>
+				{/if}
 			</LazyPlot>
 		</div>
 	{/each}
