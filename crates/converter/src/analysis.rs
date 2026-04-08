@@ -91,7 +91,9 @@ pub struct GpsQuality {
 pub struct VibrationSummary {
     pub accel_vibe_mean: Option<f64>,
     pub accel_vibe_max: Option<f64>,
-    /// "good" (< 4.905), "warning" (4.905-9.81), "critical" (> 9.81)
+    /// Worst of the mean and peak classifications.
+    /// Mean thresholds: good < 4.905, warning < 9.81, critical >= 9.81.
+    /// Max thresholds:  good < 9.81,  warning < 19.62, critical >= 19.62.
     pub status: String,
 }
 
@@ -835,14 +837,30 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     // --- Finalize vibration ---
     if vibe_count > 0 {
         let mean = vibe_sum / vibe_count as f64;
+        let max = vibe_max as f64;
         analysis.vibration.accel_vibe_mean = Some(mean);
-        analysis.vibration.accel_vibe_max = Some(vibe_max as f64);
-        analysis.vibration.status = if mean < 4.905 {
-            "good".to_string()
+        analysis.vibration.accel_vibe_max = Some(max);
+        // Status escalates on either the mean or the peak. A short but severe
+        // vibration burst (e.g. accel clipping) can leave the mean low while the
+        // peak is well into critical territory, so gate on both.
+        let mean_status = if mean < 4.905 {
+            0
         } else if mean < 9.81 {
-            "warning".to_string()
+            1
         } else {
-            "critical".to_string()
+            2
+        };
+        let max_status = if max < 9.81 {
+            0
+        } else if max < 19.62 {
+            1
+        } else {
+            2
+        };
+        analysis.vibration.status = match mean_status.max(max_status) {
+            0 => "good".to_string(),
+            1 => "warning".to_string(),
+            _ => "critical".to_string(),
         };
     }
 
