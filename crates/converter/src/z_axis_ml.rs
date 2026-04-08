@@ -1,42 +1,41 @@
 use extended_isolation_forest::{Forest, ForestOptions};
 
-pub trait Analyzer {
-    fn analyze(&self, data_point: &[f64; 2]) -> Option<&'static str>;
-}
+const DEFAULT_ANOMALY_THRESHOLD: f64 = 0.70;
+const DEFAULT_N_TREES: usize = 100;
+const DEFAULT_SAMPLE_SIZE: usize = 64;
+const DEFAULT_MAX_DEPTH: usize = 8;
 
 pub struct ZAxisAnomalyDetector {
-    model: Forest<f64, 2>,
-    anomaly_threshold: f64,
+    pub model: Forest<f64, 2>,
+    pub anomaly_threshold: f64,
 }
 
 impl ZAxisAnomalyDetector {
-    pub fn new(training_data: &[[f64; 2]]) -> Result<Self, &'static str> {
+    pub fn new(training_data: &[[f64; 2]]) -> Result<Self, String> {
         if training_data.is_empty() {
-            return Err("System Error: Cannot train on empty flight data.");
+            return Err("Incomplete data: training set is empty".into());
         }
 
         let options = ForestOptions {
-            n_trees: 100,
-            sample_size: training_data.len().min(256),
-            max_tree_depth: None,
-            extension_level: 0,
+            n_trees: DEFAULT_N_TREES,
+            sample_size: training_data.len().min(DEFAULT_SAMPLE_SIZE),
+            max_tree_depth: Some(DEFAULT_MAX_DEPTH),
+            extension_level: 1,
         };
 
-        match Forest::from_slice(training_data, &options) {
-            Ok(forest) => Ok(Self {
-                model: forest,
-                anomaly_threshold: 0.60,
-            }),
-            Err(_) => Err("System Error: Matrix compilation failed."),
-        }
-    }
-}
+        let forest = Forest::from_slice(training_data, &options)
+            .map_err(|e| format!("Forest initialization failed: {:?}", e))?;
 
-impl Analyzer for ZAxisAnomalyDetector {
-    fn analyze(&self, data_point: &[f64; 2]) -> Option<&'static str> {
-        let score = self.model.score(data_point);
+        Ok(Self {
+            model: forest,
+            anomaly_threshold: DEFAULT_ANOMALY_THRESHOLD,
+        })
+    }
+
+    pub fn analyze(&self, point: [f64; 2]) -> Option<String> {
+        let score = self.model.score(&point);
         if score > self.anomaly_threshold {
-            Some("CRITICAL: Z-Axis Anomaly")
+            Some(format!("Z-Axis Anomaly (Score: {:.2})", score))
         } else {
             None
         }
@@ -47,29 +46,23 @@ impl Analyzer for ZAxisAnomalyDetector {
 mod tests {
     use super::*;
 
-    fn get_stable_baseline() -> Vec<[f64; 2]> {
-        vec![
-            [1.0, 1.1], [1.1, 1.0], [1.0, 1.0], [1.2, 1.1],
-            [1.0, 1.2], [1.1, 1.1], [1.0, 0.9], [0.9, 1.0],
-            [1.1, 1.2], [1.05, 1.05], [0.95, 0.95], [1.15, 1.15]
-        ]
+    #[test]
+    fn test_initialization_error_on_empty() {
+        let result = ZAxisAnomalyDetector::new(&[]);
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_normal_flight_passes() {
-        let detector = ZAxisAnomalyDetector::new(&get_stable_baseline()).unwrap();
-        let normal_point = [1.1, 1.1];
-        assert_eq!(detector.analyze(&normal_point), None);
-    }
+    fn test_detection_logic() {
+        let mut training_set = Vec::new();
+        for i in 0..100 {
+            let n = (i % 5) as f64 * 0.01;
+            training_set.push([0.1 + n, 9.8 + n]);
+        }
 
-    #[test]
-    fn test_crash_triggers_anomaly() {
-        let detector = ZAxisAnomalyDetector::new(&get_stable_baseline()).unwrap();
-        let crash_point = [9.5, 9.8];
-        assert_eq!(detector.analyze(&crash_point), Some("CRITICAL: Z-Axis Anomaly"));
+        let detector = ZAxisAnomalyDetector::new(&training_set).expect("Failed to train");
+        
+        assert!(detector.analyze([0.12, 9.81]).is_none());
+        assert!(detector.analyze([15.0, 60.0]).is_some());
     }
-}
-
-fn main() {
-    println!("Z-Axis ML Module compiled successfully. Run 'cargo test' to execute diagnostic suite...");
 }
