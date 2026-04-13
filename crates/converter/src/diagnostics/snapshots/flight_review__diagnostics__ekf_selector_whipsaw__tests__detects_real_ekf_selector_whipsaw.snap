@@ -1,0 +1,36 @@
+---
+source: crates/converter/src/diagnostics/ekf_selector_whipsaw.rs
+expression: diags
+---
+[
+  {
+    "id": "ekf_selector_whipsaw",
+    "summary": "EKF2 selector whipsaw: 3 switches in 3.2s, selector switched to a degraded instance (combined_test_ratio >= 1.0)",
+    "severity": "critical",
+    "timestamp_us": 213733233,
+    "end_timestamp_us": 216888428,
+    "evidence": {
+      "type": "EkfSelectorWhipsaw",
+      "switch_count": 3,
+      "window_duration_ms": 3155,
+      "avg_switch_interval_ms": 1577.597,
+      "switched_to_degraded": true,
+      "primary_instance_test_ratio": 2.0
+    }
+  },
+  {
+    "id": "ekf_selector_whipsaw",
+    "summary": "EKF2 selector whipsaw: 3 switches in 4.6s, selector switched to a degraded instance (combined_test_ratio >= 1.0)",
+    "severity": "critical",
+    "timestamp_us": 271708159,
+    "end_timestamp_us": 276313140,
+    "evidence": {
+      "type": "EkfSelectorWhipsaw",
+      "switch_count": 3,
+      "window_duration_ms": 4604,
+      "avg_switch_interval_ms": 2302.49,
+      "switched_to_degraded": true,
+      "primary_instance_test_ratio": 2.0
+    }
+  }
+]
