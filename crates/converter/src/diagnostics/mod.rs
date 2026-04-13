@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod battery_brownout;
 pub mod ekf_failure;
+pub mod ekf_selector_whipsaw;
 pub mod gps_interference;
 pub mod motor_failure;
 pub mod rc_loss;
@@ -26,7 +27,7 @@ pub mod testing;
 
 /// Current analysis version. Bump when the analyzer set changes to trigger
 /// reprocessing of historical logs.
-pub const ANALYSIS_VERSION: u32 = 1;
+pub const ANALYSIS_VERSION: u32 = 2;
 
 /// Severity of a detected anomaly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +77,20 @@ pub enum Evidence {
     RcLoss {
         last_signal_timestamp_us: u64,
         signal_lost_duration_ms: u64,
+    },
+    EkfSelectorWhipsaw {
+        /// Number of instance switches in the detection window.
+        switch_count: u32,
+        /// Duration of the detection window (milliseconds).
+        window_duration_ms: u64,
+        /// Average time between switches in the window (milliseconds).
+        avg_switch_interval_ms: f64,
+        /// True if the selector switched to an instance with a high
+        /// combined_test_ratio (indicating switching to a degraded instance).
+        /// This is the #27013 signature.
+        switched_to_degraded: bool,
+        /// combined_test_ratio of the primary instance at detection time.
+        primary_instance_test_ratio: f32,
     },
 }
 
@@ -137,6 +152,7 @@ pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(battery_brownout::BatteryBrownoutAnalyzer::new()),
         Box::new(ekf_failure::EkfFailureAnalyzer::new()),
         Box::new(rc_loss::RcLossAnalyzer::new()),
+        Box::new(ekf_selector_whipsaw::EkfSelectorWhipsawAnalyzer::new()),
     ]
 }
 
