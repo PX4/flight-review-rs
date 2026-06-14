@@ -13,7 +13,7 @@ pub async fn upload(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     // 1. Extract the file and optional fields from multipart
     let mut file_bytes: Option<(String, Bytes)> = None;
-    let mut is_public = false;
+    let mut is_public = true;
     let mut description: Option<String> = None;
     let mut wind_speed: Option<String> = None;
     let mut rating: Option<i32> = None;

@@ -209,7 +209,7 @@ pub struct ListFilters {
     pub search: Option<String>,
     pub offset: Option<i64>,
     pub limit: Option<i64>,
-    /// If true, include private logs in results (default: only public)
+    /// If false, only public logs are returned (default: include all logs)
     pub include_private: Option<bool>,
 
     // Phase 1 search filters

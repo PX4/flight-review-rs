@@ -15,7 +15,7 @@
 	let vehicleName = $state('');
 	let locationName = $state('');
 	let tags = $state('');
-	let isPublic = $state(false);
+	let isPublic = $state(true);
 
 	function handleSubmit(e: Event) {
 		e.preventDefault();

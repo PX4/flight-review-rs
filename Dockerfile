@@ -10,6 +10,17 @@ COPY crates/ crates/
 RUN cargo build --release -p flight-review-server --features postgres \
     && cargo build --release -p flight-review --bin ulog-convert
 
+# Build frontend
+FROM node:22-bookworm-slim AS frontend-builder
+WORKDIR /frontend
+COPY frontend/package*.json ./
+RUN npm ci --include=optional --no-audit --no-fund \
+    && npm install --no-save --no-audit --no-fund @tailwindcss/oxide-linux-x64-gnu@4.2.2
+COPY frontend/ .
+ARG PUBLIC_MAPBOX_TOKEN=""
+ENV PUBLIC_MAPBOX_TOKEN=$PUBLIC_MAPBOX_TOKEN
+RUN npm run build
+
 # Runtime image — minimal, no Rust toolchain
 FROM debian:bookworm-slim
 
@@ -20,10 +31,11 @@ RUN apt-get update \
 COPY --from=builder /build/target/release/flight-review-server /usr/local/bin/
 COPY --from=builder /build/target/release/ulog-convert /usr/local/bin/
 
+# Copy frontend static assets
+COPY --from=frontend-builder /frontend/build /usr/share/flight-review/frontend
+
 # Default data directory
 RUN mkdir -p /data/files
 
-EXPOSE 8080
-
 ENTRYPOINT ["flight-review-server"]
-CMD ["serve", "--db", "sqlite:///data/flight-review.db", "--storage", "file:///data/files"]
+CMD ["serve", "--db", "sqlite:///data/flight-review.db", "--storage", "file:///data/files", "--frontend-dir", "/usr/share/flight-review/frontend"]
