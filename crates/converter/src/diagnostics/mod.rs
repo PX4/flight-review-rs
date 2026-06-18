@@ -32,13 +32,19 @@ pub const ANALYSIS_VERSION: u32 = 2;
 // ── Output descriptor types ───────────────────────────────────────────
 
 /// Whether a diagnostic marks an instant or spans a time window.
+///
+/// `end_timestamp_us` lives on `Region` — a point cannot have an end,
+/// and a region must. Invalid states are unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnomalyKind {
     /// Single point in time (e.g., battery brownout, motor drop-to-zero).
     Point,
-    /// Spans a time window with start and end (e.g., EKF failure, RC loss).
-    Region,
+    /// Spans a time window (e.g., EKF failure, RC loss).
+    Region {
+        /// End timestamp (microseconds) of the anomaly window.
+        end_timestamp_us: u64,
+    },
 }
 
 /// Where on a plot this specific anomaly should be anchored.
@@ -197,11 +203,10 @@ pub struct Diagnostic {
     /// Severity classification.
     pub severity: Severity,
     /// Whether this is a point-in-time or a region spanning a window.
+    /// For regions, carries `end_timestamp_us` inside the variant.
     pub kind: AnomalyKind,
     /// Timestamp (microseconds) where the anomaly was first detected.
     pub timestamp_us: u64,
-    /// End timestamp for Region anomalies; None for Point.
-    pub end_timestamp_us: Option<u64>,
     /// Where on a plot this anomaly should be anchored: (topic, field).
     pub anchor: PlotAnchor,
     /// Describes how to interpret the evidence fields (types, units).

@@ -9,7 +9,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 276594637,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -48,7 +47,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 281595637,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -87,7 +85,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 286798899,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -126,7 +123,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 291994636,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -165,7 +161,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 296994639,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -204,7 +199,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 302194643,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -243,7 +237,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 307196637,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -282,7 +275,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 312394638,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -321,7 +313,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 317395912,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -360,7 +351,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 322396069,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -399,7 +389,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 327397637,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"
@@ -438,7 +427,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 332595636,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "vehicle_gps_position",
       "field": "eph"

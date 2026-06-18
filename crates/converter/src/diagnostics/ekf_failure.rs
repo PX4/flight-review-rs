@@ -69,9 +69,8 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Critical,
-                    kind: AnomalyKind::Region,
+                    kind: AnomalyKind::Region { end_timestamp_us: ts },
                     timestamp_us: start,
-                    end_timestamp_us: Some(ts),
                     anchor: PlotAnchor::new("estimator_status", self.field_name),
                     descriptor: descriptor.clone(),
                     evidence: Evidence::EkfFailure {
@@ -91,9 +90,8 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Warning,
-                    kind: AnomalyKind::Region,
+                    kind: AnomalyKind::Region { end_timestamp_us: ts },
                     timestamp_us: start,
-                    end_timestamp_us: Some(ts),
                     anchor: PlotAnchor::new("estimator_status", self.field_name),
                     descriptor: descriptor.clone(),
                     evidence: Evidence::EkfFailure {

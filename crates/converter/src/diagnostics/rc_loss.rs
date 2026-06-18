@@ -64,9 +64,8 @@ impl RcLossAnalyzer {
                 start_us as f64 / 1_000_000.0,
             ),
             severity,
-            kind: AnomalyKind::Region,
+            kind: AnomalyKind::Region { end_timestamp_us: end_us },
             timestamp_us: start_us,
-            end_timestamp_us: Some(end_us),
             anchor: PlotAnchor::new("input_rc", "rc_lost"),
             descriptor: self.output_descriptor(),
             evidence: Evidence::RcLoss {

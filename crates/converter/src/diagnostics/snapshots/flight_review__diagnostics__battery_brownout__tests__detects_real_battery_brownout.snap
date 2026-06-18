@@ -9,7 +9,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 158986930,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "battery_status",
       "field": "voltage_v"
@@ -43,7 +42,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 189186929,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "battery_status",
       "field": "voltage_v"
@@ -77,7 +75,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 219386927,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "battery_status",
       "field": "voltage_v"

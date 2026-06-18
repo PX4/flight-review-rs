@@ -9,7 +9,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[0]"
@@ -44,7 +43,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[1]"
@@ -79,7 +77,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[2]"
@@ -114,7 +111,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[3]"
@@ -149,7 +145,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[4]"
@@ -184,7 +179,6 @@ expression: diags
     "severity": "critical",
     "kind": "point",
     "timestamp_us": 5081817622,
-    "end_timestamp_us": null,
     "anchor": {
       "topic": "actuator_outputs",
       "field": "output[5]"

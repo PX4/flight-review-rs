@@ -110,9 +110,8 @@ impl Analyzer for YourAnalyzer {
                         id: "your_analyzer".to_string(),
                         summary: format!("Z-axis vibration {az:.1} m/s² at {:.1}s", ts as f64 / 1e6),
                         severity: Severity::Warning,
-                        kind: AnomalyKind::Point,       // or Region for windowed anomalies
+                        kind: AnomalyKind::Point,
                         timestamp_us: ts,
-                        end_timestamp_us: None,          // Some(end_ts) for Region
                         anchor: PlotAnchor::new("sensor_combined", "accelerometer_m_s2[2]"),
                         descriptor: self.output_descriptor(),
                         evidence: Evidence::ZAxisVibrationAnomaly {
@@ -151,7 +150,7 @@ impl Analyzer for YourAnalyzer {
 
 ### Diagnostic fields
 
-- **`kind: AnomalyKind`** — `Point` (single instant) or `Region` (time window with `end_timestamp_us`). Set explicitly per diagnostic, not per analyzer.
+- **`kind: AnomalyKind`** — `Point` (single instant) or `Region { end_timestamp_us }` (time window). The end timestamp lives inside the variant — a point can't have one, a region must.
 - **`anchor: PlotAnchor`** — the specific `(topic, field)` where the anomaly should be plotted. Motor 4 failing anchors to `("actuator_outputs", "output[4]")`, not just the topic generically. Set at emit time since the analyzer knows the exact field.
 - **`descriptor: OutputDescriptor`** — typed field semantics embedded on each diagnostic. Built via the builder API (see below).
 
@@ -186,7 +185,7 @@ Available `FieldUnit` variants:
 
 Each `Diagnostic` carries:
 
-- **`kind: AnomalyKind`** — `Point` (single instant) or `Region` (time window with `end_timestamp_us`). Set explicitly per diagnostic, not per analyzer.
+- **`kind: AnomalyKind`** — `Point` (single instant) or `Region { end_timestamp_us }` (time window). The end timestamp lives inside the variant — a point can't have one, a region must.
 - **`anchor: PlotAnchor`** — the specific `(topic, field)` where the anomaly should be plotted. Motor 4 failing anchors to `("actuator_outputs", "output[4]")`, not just the topic generically. Set at emit time since the analyzer knows the exact field.
 
 ## Step 3: Register it

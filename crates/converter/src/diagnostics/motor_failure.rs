@@ -152,7 +152,6 @@ impl Analyzer for MotorFailureAnalyzer {
                             severity: Severity::Critical,
                             kind: AnomalyKind::Point,
                             timestamp_us: ts,
-                            end_timestamp_us: None,
                             anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
                             descriptor: self.output_descriptor(),
                             evidence: Evidence::MotorFailure {
@@ -181,9 +180,8 @@ impl Analyzer for MotorFailureAnalyzer {
                                     ts as f64 / 1_000_000.0,
                                 ),
                                 severity: Severity::Warning,
-                                kind: AnomalyKind::Region,
+                                kind: AnomalyKind::Region { end_timestamp_us: ts },
                                 timestamp_us: first_ts,
-                                end_timestamp_us: Some(ts),
                                 anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
                                 descriptor: self.output_descriptor(),
                                 evidence: Evidence::MotorFailure {

@@ -122,7 +122,6 @@ impl Analyzer for BatteryBrownoutAnalyzer {
                         severity: Severity::Critical,
                         kind: AnomalyKind::Point,
                         timestamp_us: ts,
-                        end_timestamp_us: None,
                         anchor: PlotAnchor::new("battery_status", "voltage_v"),
                         descriptor: self.output_descriptor(),
                         evidence: Evidence::BatteryBrownout {

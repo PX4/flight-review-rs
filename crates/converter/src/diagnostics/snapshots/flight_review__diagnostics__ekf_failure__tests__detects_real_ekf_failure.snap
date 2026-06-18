@@ -7,9 +7,12 @@ expression: diags
     "id": "ekf_failure",
     "summary": "EKF velocity innovation exceeded threshold for 2.2s starting at 117.3s",
     "severity": "warning",
-    "kind": "region",
+    "kind": {
+      "region": {
+        "end_timestamp_us": 119539590
+      }
+    },
     "timestamp_us": 117349822,
-    "end_timestamp_us": 119539590,
     "anchor": {
       "topic": "estimator_status",
       "field": "vel_test_ratio"
@@ -41,9 +44,12 @@ expression: diags
     "id": "ekf_failure",
     "summary": "EKF position innovation exceeded threshold for 2.0s starting at 117.9s",
     "severity": "warning",
-    "kind": "region",
+    "kind": {
+      "region": {
+        "end_timestamp_us": 119939471
+      }
+    },
     "timestamp_us": 117939397,
-    "end_timestamp_us": 119939471,
     "anchor": {
       "topic": "estimator_status",
       "field": "pos_test_ratio"
@@ -75,9 +81,12 @@ expression: diags
     "id": "ekf_failure",
     "summary": "EKF position innovation exceeded threshold for 5.0s starting at 117.9s",
     "severity": "critical",
-    "kind": "region",
+    "kind": {
+      "region": {
+        "end_timestamp_us": 122949150
+      }
+    },
     "timestamp_us": 117939397,
-    "end_timestamp_us": 122949150,
     "anchor": {
       "topic": "estimator_status",
       "field": "pos_test_ratio"

@@ -165,7 +165,6 @@ impl Analyzer for GpsInterferenceAnalyzer {
                 severity,
                 kind: AnomalyKind::Point,
                 timestamp_us: ts,
-                end_timestamp_us: None,
                 anchor: PlotAnchor::new("vehicle_gps_position", "eph"),
                 descriptor: self.output_descriptor(),
                 evidence: Evidence::GpsInterference {
