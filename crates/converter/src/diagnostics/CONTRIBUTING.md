@@ -19,7 +19,7 @@ Key properties to keep in mind when designing an analyzer:
 
 ## Step 1: Add an `Evidence` variant
 
-Every analyzer emits typed, structured evidence — not freeform strings or maps. The frontend matches on `evidence.type` and renders a specific UI for each variant. Changing an existing variant's fields is a breaking schema change, so pick field names carefully the first time.
+Every analyzer emits typed, structured evidence — not freeform strings or maps. Changing an existing variant's fields is a breaking schema change, so pick field names carefully the first time.
 
 Edit [`mod.rs`](./mod.rs) and add your variant:
 
@@ -37,9 +37,21 @@ pub enum Evidence {
 
 Also bump `ANALYSIS_VERSION` in the same file when your analyzer is ready to ship. That tells the reprocessing pipeline historical logs need a re-scan.
 
-## Step 2: Create the analyzer file
+## Step 2: Create the analyzer
 
-Create `crates/converter/src/diagnostics/your_analyzer.rs`. Minimal skeleton:
+Each analyzer is a flat `.rs` file in the `diagnostics/` directory:
+
+```
+diagnostics/
+├── mod.rs                  # Core types, trait, factory
+├── testing.rs              # Test utilities (MessageBuilder, etc.)
+├── your_analyzer.rs        # ← your analyzer
+├── battery_brownout.rs
+├── ekf_failure.rs
+└── ...
+```
+
+Create `crates/converter/src/diagnostics/your_analyzer.rs`:
 
 ```rust
 //! Short description of what this analyzer detects and how.
@@ -47,13 +59,15 @@ Create `crates/converter/src/diagnostics/your_analyzer.rs`. Minimal skeleton:
 //! Topics consumed, thresholds used, and any known limitations or fixture gaps
 //! (use SKIP_FIXTURE: <reason> if no real-world log exists yet).
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit,
+    OutputDescriptor, PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 
 const SOME_THRESHOLD: f32 = 2.5;
 
 pub struct YourAnalyzer {
-    // Per-flight state. Reset per log.
     detections: Vec<Diagnostic>,
 }
 
@@ -90,8 +104,25 @@ impl Analyzer for YourAnalyzer {
                 let Some(az) = parse_field::<f32>(data, "accelerometer_m_s2[2]") else {
                     return;
                 };
-                // ... update state, maybe push to self.detections ...
-                let _ = (ts, az);
+                // ... detect anomaly, emit Diagnostic ...
+                if az > SOME_THRESHOLD {
+                    self.detections.push(Diagnostic {
+                        id: "your_analyzer".to_string(),
+                        summary: format!("Z-axis vibration {az:.1} m/s² at {:.1}s", ts as f64 / 1e6),
+                        severity: Severity::Warning,
+                        kind: AnomalyKind::Point,       // or Region for windowed anomalies
+                        timestamp_us: ts,
+                        end_timestamp_us: None,          // Some(end_ts) for Region
+                        anchor: PlotAnchor::new("sensor_combined", "accelerometer_m_s2[2]"),
+                        descriptor: self.output_descriptor(),
+                        evidence: Evidence::ZAxisVibrationAnomaly {
+                            score: az,
+                            peak_accel_m_s2: az,
+                            window_start_us: ts,
+                            window_end_us: ts,
+                        },
+                    });
+                }
             }
             _ => {}
         }
@@ -100,15 +131,63 @@ impl Analyzer for YourAnalyzer {
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
     }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("score", FieldUnit::Ratio)
+            .field("peak_accel_m_s2", FieldUnit::Meters)  // m/s² — closest typed unit
+            .field("window_start_us", FieldUnit::Microseconds)
+            .field("window_end_us", FieldUnit::Microseconds)
+    }
 }
 ```
 
-Notes on the trait methods:
+### Trait methods
 
 - **`id()`** is the stable machine identifier stored in the database and exposed via the API's `?diagnostic=` filter. Don't change it after release.
 - **`required_topics()`** must match the exact ULog topic names. Typos mean your analyzer silently never runs.
 - **`on_message()`** must not panic and must handle missing fields gracefully — use `parse_field::<T>()`, which returns `Option<T>`, never unwrap.
 - **`finish()`** takes `Box<Self>` (the pipeline owns the analyzers). Move your accumulated detections out and return them.
+
+### Diagnostic fields
+
+- **`kind: AnomalyKind`** — `Point` (single instant) or `Region` (time window with `end_timestamp_us`). Set explicitly per diagnostic, not per analyzer.
+- **`anchor: PlotAnchor`** — the specific `(topic, field)` where the anomaly should be plotted. Motor 4 failing anchors to `("actuator_outputs", "output[4]")`, not just the topic generically. Set at emit time since the analyzer knows the exact field.
+- **`descriptor: OutputDescriptor`** — typed field semantics embedded on each diagnostic. Built via the builder API (see below).
+
+### Output descriptor
+
+Every analyzer implements `output_descriptor()` to declare the typed semantics of its evidence fields. This is baked into `metadata.json` alongside the diagnostics at ingest time — no separate API call, no late-binding.
+
+Use the builder API:
+
+```rust
+OutputDescriptor::new()
+    .field("voltage_v", FieldUnit::Volts)
+    .field("current_a", FieldUnit::Amps)
+    .field("flight_mode", FieldUnit::Label)
+```
+
+Available `FieldUnit` variants:
+
+| Unit | Meaning |
+|---|---|
+| `Volts` | Voltage |
+| `Amps` | Current |
+| `Meters` | Distance |
+| `Microseconds` | Timestamp or duration in µs |
+| `Milliseconds` | Duration in ms |
+| `Pwm` | PWM output value |
+| `Ratio` | Dimensionless ratio |
+| `Count` | Integer count |
+| `Label` | Free-form string (flight mode, innovation name, etc.) |
+
+### Anomaly kind and plot anchor
+
+Each `Diagnostic` carries:
+
+- **`kind: AnomalyKind`** — `Point` (single instant) or `Region` (time window with `end_timestamp_us`). Set explicitly per diagnostic, not per analyzer.
+- **`anchor: PlotAnchor`** — the specific `(topic, field)` where the anomaly should be plotted. Motor 4 failing anchors to `("actuator_outputs", "output[4]")`, not just the topic generically. Set at emit time since the analyzer knows the exact field.
 
 ## Step 3: Register it
 
@@ -154,7 +233,7 @@ cargo test -p flight-review --lib diagnostics
 cargo bench -p flight-review --bench convert
 ```
 
-If `check-analyzer.sh` complains, it will tell you exactly which of the five criteria you missed. If the bench regresses past the budget, profile your `on_message` — the usual culprit is allocating or parsing the same field multiple times per message.
+If `check-analyzer.sh` complains, it will tell you exactly which criteria you missed. If the bench regresses past the budget, profile your `on_message` — the usual culprit is allocating or parsing the same field multiple times per message.
 
 ## Common first-time mistakes
 
@@ -164,6 +243,7 @@ If `check-analyzer.sh` complains, it will tell you exactly which of the five cri
 - **Assuming you get the whole log at once.** You don't. Design for streaming.
 - **Pulling in heavy ML dependencies without discussing the perf/memory budget first.** The converter is zero-ML today; open an issue before adding something like `extended-isolation-forest`, `smartcore`, etc. so we can agree on how the model is trained, shipped, and benchmarked.
 - **Skipping the real-world fixture.** Synthetic tests alone don't count toward the CI gate. Either ship a fixture or mark `SKIP_FIXTURE` with a reason.
+- **Using free-form strings for field metadata.** Use `FieldUnit` typed descriptors. No `"unit": "V"` strings — use `FieldUnit::Volts`.
 
 ## Questions
 

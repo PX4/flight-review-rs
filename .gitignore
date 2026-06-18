@@ -2,3 +2,6 @@
 /data
 /.claude
 /node_modules
+*.code-workspace
+*.db
+.DS_Store

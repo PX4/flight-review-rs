@@ -13,6 +13,7 @@
 #      - snapshot test
 #   4. Is registered in create_analyzers() factory
 #   5. Has an Evidence enum variant
+#   6. Implements output_descriptor()
 #
 # Usage: scripts/ci/check-analyzer.sh [--changed-only]
 #   --changed-only: only check analyzers modified in the current PR
@@ -36,23 +37,25 @@ if [[ "${1:-}" == "--changed-only" ]]; then
     # Get files changed in this PR vs main
     changed_files=$(git diff --name-only origin/main...HEAD -- "$DIAG_DIR/" 2>/dev/null || \
                     git diff --name-only HEAD~1 -- "$DIAG_DIR/" 2>/dev/null || echo "")
+
+    # Extract unique analyzer names from changed paths
+    analyzer_names=$(echo "$changed_files" \
+        | sed -n 's|^crates/converter/src/diagnostics/\([^/.]*\)\.rs$|\1|p' \
+        | grep -v -E '^(mod|testing)$' \
+        | sort -u)
+
     analyzer_files=""
-    for f in $changed_files; do
-        base=$(basename "$f")
-        # Skip mod.rs, testing.rs, snapshots
-        if [[ "$base" != "mod.rs" && "$base" != "testing.rs" && "$base" == *.rs ]]; then
-            full="$REPO_ROOT/$f"
-            if [[ -f "$full" ]]; then
-                analyzer_files="$analyzer_files $full"
-            fi
-        fi
+    for name in $analyzer_names; do
+        [[ -f "$DIAG_DIR/${name}.rs" ]] && analyzer_files="$analyzer_files $DIAG_DIR/${name}.rs"
     done
+
     if [[ -z "$analyzer_files" ]]; then
         echo "No analyzer files changed. Skipping checks."
         exit 0
     fi
 else
-    analyzer_files=$(find "$DIAG_DIR" -name "*.rs" \
+    # Find all analyzer .rs files (excluding mod.rs, testing.rs)
+    analyzer_files=$(find "$DIAG_DIR" -maxdepth 1 -name "*.rs" \
         ! -name "mod.rs" \
         ! -name "testing.rs" \
         | sort)
@@ -119,7 +122,6 @@ for analyzer_file in $analyzer_files; do
     fi
 
     # 4. Check registered in create_analyzers()
-    # Look for the struct name in the factory function
     struct_name=$(grep -o 'pub struct [A-Za-z]*' "$analyzer_file" | head -1 | awk '{print $3}')
     if [[ -n "$struct_name" ]] && grep -q "$struct_name" "$MOD_FILE"; then
         ok "registered in create_analyzers()"
@@ -128,22 +130,23 @@ for analyzer_file in $analyzer_files; do
     fi
 
     # 5. Check Evidence enum variant exists
-    # Extract the id string from the analyzer
-    analyzer_id=$(grep -A1 'fn id' "$analyzer_file" | grep '"' | tr -d ' "' || true)
-    if [[ -n "$analyzer_id" ]]; then
-        # Check Evidence enum has a variant (heuristic: CamelCase of the id)
-        if grep -q "^    [A-Z].*{" "$MOD_FILE" | head -20 && \
-           grep -q "evidence: Evidence::" "$analyzer_file"; then
-            ok "uses Evidence enum variant"
-        else
-            warn "$name: could not verify Evidence variant"
-        fi
+    if grep -q "evidence: Evidence::" "$analyzer_file"; then
+        ok "uses Evidence enum variant"
+    else
+        err "$name: missing Evidence enum variant usage"
+    fi
+
+    # 6. Check output_descriptor() is implemented
+    if grep -q 'fn output_descriptor' "$analyzer_file"; then
+        ok "implements output_descriptor()"
+    else
+        err "$name: missing fn output_descriptor() implementation"
     fi
 
     echo
 done
 
-# 6. Check that all analyzer modules are declared in mod.rs
+# 7. Check that all analyzer modules are declared in mod.rs
 echo "--- mod.rs declarations ---"
 for analyzer_file in $analyzer_files; do
     name=$(basename "$analyzer_file" .rs)

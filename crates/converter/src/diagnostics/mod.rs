@@ -2,16 +2,16 @@
 //!
 //! Each analyzer implements the [`Analyzer`] trait, declares the ULog topics it
 //! needs, receives messages during the existing `analyze()` streaming pass, and
-//! emits [`Diagnostic`] structs with severity, timestamps, and typed evidence.
+//! emits [`Diagnostic`] structs with severity, timestamps, typed evidence, and
+//! an [`OutputDescriptor`] that describes how to interpret the evidence fields.
 //!
 //! # Adding a new analyzer
 //!
 //! 1. Create `crates/converter/src/diagnostics/your_analyzer.rs`
 //! 2. Add a new variant to [`Evidence`] for your diagnostic type
-//! 3. Implement the [`Analyzer`] trait
+//! 3. Implement the [`Analyzer`] trait (including `output_descriptor()`)
 //! 4. Register it in [`create_analyzers()`]
 //! 5. Add tests following the required pattern in [`testing`]
-//! 6. Run `cargo bench` and include results in your PR
 
 use px4_ulog::stream_parser::model::{DataMessage, ParseableFieldType};
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,92 @@ pub mod testing;
 /// reprocessing of historical logs.
 pub const ANALYSIS_VERSION: u32 = 2;
 
+// ── Output descriptor types ───────────────────────────────────────────
+
+/// Whether a diagnostic marks an instant or spans a time window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnomalyKind {
+    /// Single point in time (e.g., battery brownout, motor drop-to-zero).
+    Point,
+    /// Spans a time window with start and end (e.g., EKF failure, RC loss).
+    Region,
+}
+
+/// Where on a plot this specific anomaly should be anchored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlotAnchor {
+    pub topic: String,
+    pub field: String,
+}
+
+impl PlotAnchor {
+    pub fn new(topic: &str, field: &str) -> Self {
+        Self {
+            topic: topic.to_string(),
+            field: field.to_string(),
+        }
+    }
+}
+
+/// Typed semantic for an evidence field value.
+///
+/// Used instead of free-form unit/format strings so invalid descriptors
+/// are caught at compile time.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldUnit {
+    Volts,
+    Amps,
+    Meters,
+    Microseconds,
+    Milliseconds,
+    Pwm,
+    Ratio,
+    Count,
+    /// Free-form string field (flight mode, innovation name, etc.).
+    Label,
+}
+
+/// Descriptor for a single evidence field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldDescriptor {
+    pub name: String,
+    pub unit: FieldUnit,
+}
+
+/// Describes how to interpret a diagnostic's evidence fields.
+///
+/// Built via typed constructors — not hand-written JSON.
+/// Embedded on each [`Diagnostic`], self-contained and pre-joined.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputDescriptor {
+    pub fields: Vec<FieldDescriptor>,
+}
+
+impl OutputDescriptor {
+    pub fn new() -> Self {
+        Self { fields: vec![] }
+    }
+
+    /// Declare an evidence field with a typed unit.
+    pub fn field(mut self, name: &str, unit: FieldUnit) -> Self {
+        self.fields.push(FieldDescriptor {
+            name: name.to_string(),
+            unit,
+        });
+        self
+    }
+}
+
+impl Default for OutputDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ── Core diagnostic types ─────────────────────────────────────────────
+
 /// Severity of a detected anomaly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -41,20 +127,27 @@ pub enum Severity {
     Critical,
 }
 
+/// Motor failure mode — typed discriminant replacing free-form string.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotorFailureMode {
+    DropToZero,
+    LockedAtMax,
+}
+
 /// Typed evidence for each diagnostic kind.
 ///
-/// Every analyzer returns a specific variant — not a freeform map. The frontend
-/// matches on `evidence.type` and renders structured UI for each diagnostic.
-/// Adding a new analyzer means adding a new variant here; changing an existing
-/// variant's fields is a breaking change requiring a version bump and backfill.
+/// Every analyzer returns a specific variant — not a freeform map.
+/// Adding a new analyzer means adding a new variant here; changing an
+/// existing variant's fields is a breaking change requiring a version
+/// bump and snapshot update.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum Evidence {
     MotorFailure {
         motor_index: u8,
         pwm_value: f32,
-        /// "drop_to_zero" or "locked_at_max"
-        failure_mode: String,
+        mode: MotorFailureMode,
         flight_mode: String,
     },
     GpsInterference {
@@ -94,7 +187,7 @@ pub enum Evidence {
     },
 }
 
-/// A single detected anomaly with typed evidence.
+/// A single detected anomaly with typed evidence and output descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostic {
     /// Machine-readable identifier, e.g. "motor_failure", "gps_interference".
@@ -103,10 +196,16 @@ pub struct Diagnostic {
     pub summary: String,
     /// Severity classification.
     pub severity: Severity,
+    /// Whether this is a point-in-time or a region spanning a window.
+    pub kind: AnomalyKind,
     /// Timestamp (microseconds) where the anomaly was first detected.
     pub timestamp_us: u64,
-    /// Optional end timestamp if the anomaly spans a window.
+    /// End timestamp for Region anomalies; None for Point.
     pub end_timestamp_us: Option<u64>,
+    /// Where on a plot this anomaly should be anchored: (topic, field).
+    pub anchor: PlotAnchor,
+    /// Describes how to interpret the evidence fields (types, units).
+    pub descriptor: OutputDescriptor,
     /// Typed, structured evidence specific to this diagnostic.
     pub evidence: Evidence,
 }
@@ -132,6 +231,9 @@ pub trait Analyzer {
 
     /// Called after the streaming pass completes. Return any detected anomalies.
     fn finish(self: Box<Self>) -> Vec<Diagnostic>;
+
+    /// Describes this analyzer's output shape — field names and typed units.
+    fn output_descriptor(&self) -> OutputDescriptor;
 }
 
 /// Parse a typed field from a DataMessage, returning None if the field is
@@ -144,7 +246,7 @@ pub fn parse_field<T: ParseableFieldType>(data: &DataMessage, name: &str) -> Opt
         .map(|p| p.parse(data.data))
 }
 
-/// Create all Phase 1 diagnostic analyzers.
+/// Create all diagnostic analyzers.
 pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
     vec![
         Box::new(motor_failure::MotorFailureAnalyzer::new()),
@@ -179,3 +281,4 @@ pub fn create_analyzers_filtered(ids: &[String]) -> Result<Vec<Box<dyn Analyzer>
     }
     Ok(selected)
 }
+

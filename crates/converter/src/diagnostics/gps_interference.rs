@@ -5,7 +5,10 @@
 //! - EPV (vertical position error) spikes above threshold
 //! - Satellite count drops significantly below baseline
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 
 /// Number of samples to establish baseline.
@@ -160,8 +163,11 @@ impl Analyzer for GpsInterferenceAnalyzer {
                     reasons.join(", ")
                 ),
                 severity,
+                kind: AnomalyKind::Point,
                 timestamp_us: ts,
                 end_timestamp_us: None,
+                anchor: PlotAnchor::new("vehicle_gps_position", "eph"),
+                descriptor: self.output_descriptor(),
                 evidence: Evidence::GpsInterference {
                     eph_m: current_eph,
                     epv_m: current_epv,
@@ -174,6 +180,14 @@ impl Analyzer for GpsInterferenceAnalyzer {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("eph_m", FieldUnit::Meters)
+            .field("epv_m", FieldUnit::Meters)
+            .field("num_satellites", FieldUnit::Count)
+            .field("noise_level", FieldUnit::Ratio)
     }
 }
 

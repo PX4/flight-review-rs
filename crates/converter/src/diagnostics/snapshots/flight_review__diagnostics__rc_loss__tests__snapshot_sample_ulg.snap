@@ -1,6 +1,5 @@
 ---
-source: crates/converter/src/diagnostics/rc_loss.rs
-assertion_line: 303
+source: crates/converter/src/diagnostics/rc_loss/mod.rs
 expression: diags
 ---
 []

@@ -8,7 +8,10 @@
 
 use std::collections::{HashSet, VecDeque};
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, MotorFailureMode,
+    OutputDescriptor, PlotAnchor, Severity,
+};
 use crate::analysis::nav_state_name;
 use px4_ulog::stream_parser::model::DataMessage;
 
@@ -25,7 +28,7 @@ pub struct MotorFailureAnalyzer {
     motor_windows: Vec<VecDeque<(u64, f32)>>,
     detections: Vec<Diagnostic>,
     /// Track which (motor_index, failure_mode) pairs have already fired.
-    fired: HashSet<(u8, String)>,
+    fired: HashSet<(u8, MotorFailureMode)>,
     /// Track which motors have been active (non-zero output while armed).
     /// Unused channels stay at 0 and should not be flagged.
     motor_was_active: Vec<bool>,
@@ -136,8 +139,8 @@ impl Analyzer for MotorFailureAnalyzer {
 
                     // Check: PWM drop to zero — only if motor was previously active
                     let was_active = self.motor_was_active.get(i).copied().unwrap_or(false);
-                    if pwm == 0.0 && was_active && !self.fired.contains(&(motor_idx, "drop_to_zero".to_string())) {
-                        self.fired.insert((motor_idx, "drop_to_zero".to_string()));
+                    if pwm == 0.0 && was_active && !self.fired.contains(&(motor_idx, MotorFailureMode::DropToZero)) {
+                        self.fired.insert((motor_idx, MotorFailureMode::DropToZero));
                         self.detections.push(Diagnostic {
                             id: "motor_failure".to_string(),
                             summary: format!(
@@ -147,12 +150,15 @@ impl Analyzer for MotorFailureAnalyzer {
                                 self.current_flight_mode
                             ),
                             severity: Severity::Critical,
+                            kind: AnomalyKind::Point,
                             timestamp_us: ts,
                             end_timestamp_us: None,
+                            anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
+                            descriptor: self.output_descriptor(),
                             evidence: Evidence::MotorFailure {
                                 motor_index: motor_idx,
                                 pwm_value: pwm,
-                                failure_mode: "drop_to_zero".to_string(),
+                                mode: MotorFailureMode::DropToZero,
                                 flight_mode: self.current_flight_mode.clone(),
                             },
                         });
@@ -162,9 +168,9 @@ impl Analyzer for MotorFailureAnalyzer {
                     if let Some(window) = self.motor_windows.get(i) {
                         if window.len() == WINDOW_SIZE
                             && window.iter().all(|(_, p)| *p >= PWM_MAX_THRESHOLD)
-                            && !self.fired.contains(&(motor_idx, "locked_at_max".to_string()))
+                            && !self.fired.contains(&(motor_idx, MotorFailureMode::LockedAtMax))
                         {
-                            self.fired.insert((motor_idx, "locked_at_max".to_string()));
+                            self.fired.insert((motor_idx, MotorFailureMode::LockedAtMax));
                             let first_ts = window.front().map(|(t, _)| *t).unwrap_or(ts);
                             self.detections.push(Diagnostic {
                                 id: "motor_failure".to_string(),
@@ -175,12 +181,15 @@ impl Analyzer for MotorFailureAnalyzer {
                                     ts as f64 / 1_000_000.0,
                                 ),
                                 severity: Severity::Warning,
+                                kind: AnomalyKind::Region,
                                 timestamp_us: first_ts,
                                 end_timestamp_us: Some(ts),
+                                anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
+                                descriptor: self.output_descriptor(),
                                 evidence: Evidence::MotorFailure {
                                     motor_index: motor_idx,
                                     pwm_value: pwm,
-                                    failure_mode: "locked_at_max".to_string(),
+                                    mode: MotorFailureMode::LockedAtMax,
                                     flight_mode: self.current_flight_mode.clone(),
                                 },
                             });
@@ -194,6 +203,13 @@ impl Analyzer for MotorFailureAnalyzer {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("motor_index", FieldUnit::Count)
+            .field("pwm_value", FieldUnit::Pwm)
+            .field("flight_mode", FieldUnit::Label)
     }
 }
 
@@ -241,14 +257,17 @@ mod tests {
         let diags = Box::new(analyzer).finish();
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].severity, Severity::Critical);
+        assert_eq!(diags[0].kind, AnomalyKind::Point);
+        assert_eq!(diags[0].anchor.topic, "actuator_outputs");
+        assert_eq!(diags[0].anchor.field, "output[1]");
         match &diags[0].evidence {
             Evidence::MotorFailure {
                 motor_index,
-                failure_mode,
+                mode,
                 ..
             } => {
                 assert_eq!(*motor_index, 1);
-                assert_eq!(failure_mode, "drop_to_zero");
+                assert_eq!(*mode, MotorFailureMode::DropToZero);
             }
             _ => panic!("Expected MotorFailure evidence"),
         }

@@ -548,6 +548,10 @@ See the full contributor guide at [`crates/converter/src/diagnostics/CONTRIBUTIN
 
 CI (`diagnostics.yml`) validates the pattern automatically on PRs that touch the diagnostics directory. Run `scripts/ci/check-analyzer.sh` locally to verify before pushing.
 
+### Output Descriptors
+
+Each analyzer implements `output_descriptor()` to declare the typed semantics of its evidence fields (`FieldUnit::Volts`, `FieldUnit::Pwm`, etc.). These descriptors are embedded on each `Diagnostic` and baked into `metadata.json` at ingest time — no separate API call, no late-binding. Each diagnostic also carries an `AnomalyKind` (Point or Region) and a `PlotAnchor` (topic + field) for precise plot overlay. See the [Output Descriptor](crates/converter/src/diagnostics/CONTRIBUTING.md#output-descriptor) section of the contributor guide for details.
+
 ## For Researchers
 
 There are two paths for working with flight log data, depending on your tools and workflow.

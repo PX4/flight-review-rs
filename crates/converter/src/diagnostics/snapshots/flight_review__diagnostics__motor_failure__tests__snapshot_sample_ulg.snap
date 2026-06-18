@@ -1,6 +1,5 @@
 ---
-source: crates/converter/src/diagnostics/motor_failure.rs
-assertion_line: 298
+source: crates/converter/src/diagnostics/motor_failure/mod.rs
 expression: diags
 ---
 []

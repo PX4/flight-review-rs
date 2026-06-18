@@ -1,6 +1,5 @@
 ---
-source: crates/converter/src/diagnostics/ekf_failure.rs
-assertion_line: 254
+source: crates/converter/src/diagnostics/ekf_failure/mod.rs
 expression: diags
 ---
 []

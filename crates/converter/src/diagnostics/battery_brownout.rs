@@ -4,7 +4,10 @@
 //! cell count from initial voltage and flags when voltage drops below
 //! critical threshold per cell.
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 
 /// Per-cell critical voltage threshold (V).
@@ -117,8 +120,11 @@ impl Analyzer for BatteryBrownoutAnalyzer {
                             self.cell_count.unwrap_or(0),
                         ),
                         severity: Severity::Critical,
+                        kind: AnomalyKind::Point,
                         timestamp_us: ts,
                         end_timestamp_us: None,
+                        anchor: PlotAnchor::new("battery_status", "voltage_v"),
+                        descriptor: self.output_descriptor(),
                         evidence: Evidence::BatteryBrownout {
                             voltage_v: voltage,
                             critical_threshold_v: self.critical_threshold_v,
@@ -133,6 +139,13 @@ impl Analyzer for BatteryBrownoutAnalyzer {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("voltage_v", FieldUnit::Volts)
+            .field("critical_threshold_v", FieldUnit::Volts)
+            .field("current_a", FieldUnit::Amps)
     }
 }
 

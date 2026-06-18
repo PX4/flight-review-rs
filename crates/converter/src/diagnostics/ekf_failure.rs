@@ -5,7 +5,10 @@
 //! EKF is failing to converge and the position/velocity estimates are
 //! unreliable.
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 
 /// Test ratio threshold — above this the EKF innovation is failing.
@@ -35,7 +38,13 @@ impl InnovationTracker {
         }
     }
 
-    fn update(&mut self, ts: u64, ratio: f32, detections: &mut Vec<Diagnostic>) {
+    fn update(
+        &mut self,
+        ts: u64,
+        ratio: f32,
+        descriptor: &OutputDescriptor,
+        detections: &mut Vec<Diagnostic>,
+    ) {
         if !ratio.is_finite() {
             return;
         }
@@ -60,8 +69,11 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Critical,
+                    kind: AnomalyKind::Region,
                     timestamp_us: start,
                     end_timestamp_us: Some(ts),
+                    anchor: PlotAnchor::new("estimator_status", self.field_name),
+                    descriptor: descriptor.clone(),
                     evidence: Evidence::EkfFailure {
                         innovation: self.name.to_string(),
                         test_ratio: ratio,
@@ -79,8 +91,11 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Warning,
+                    kind: AnomalyKind::Region,
                     timestamp_us: start,
                     end_timestamp_us: Some(ts),
+                    anchor: PlotAnchor::new("estimator_status", self.field_name),
+                    descriptor: descriptor.clone(),
                     evidence: Evidence::EkfFailure {
                         innovation: self.name.to_string(),
                         test_ratio: ratio,
@@ -147,15 +162,23 @@ impl Analyzer for EkfFailureAnalyzer {
             .map(|tf| tf.parse_timestamp(data.data))
             .unwrap_or(0);
 
+        let descriptor = self.output_descriptor();
         for tracker in &mut self.trackers {
             if let Some(ratio) = parse_field::<f32>(data, tracker.field_name) {
-                tracker.update(ts, ratio, &mut self.detections);
+                tracker.update(ts, ratio, &descriptor, &mut self.detections);
             }
         }
     }
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("innovation", FieldUnit::Label)
+            .field("test_ratio", FieldUnit::Ratio)
+            .field("threshold", FieldUnit::Ratio)
     }
 }
 

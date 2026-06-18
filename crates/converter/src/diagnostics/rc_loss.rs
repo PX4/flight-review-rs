@@ -7,7 +7,10 @@
 //! SKIP_FIXTURE: No known ULog in our corpus exhibits RC signal loss.
 //! Add a fixture when one becomes available.
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 
 /// Minimum loss duration (microseconds) to report.
@@ -61,8 +64,11 @@ impl RcLossAnalyzer {
                 start_us as f64 / 1_000_000.0,
             ),
             severity,
+            kind: AnomalyKind::Region,
             timestamp_us: start_us,
             end_timestamp_us: Some(end_us),
+            anchor: PlotAnchor::new("input_rc", "rc_lost"),
+            descriptor: self.output_descriptor(),
             evidence: Evidence::RcLoss {
                 last_signal_timestamp_us: self.last_signal_us,
                 signal_lost_duration_ms: duration_ms,
@@ -144,6 +150,12 @@ impl Analyzer for RcLossAnalyzer {
             }
         }
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("last_signal_timestamp_us", FieldUnit::Microseconds)
+            .field("signal_lost_duration_ms", FieldUnit::Milliseconds)
     }
 }
 

@@ -1,6 +1,5 @@
 ---
 source: crates/converter/src/diagnostics/gps_interference.rs
-assertion_line: 343
 expression: diags
 ---
 [
@@ -8,8 +7,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 276.6s: EPV 3750004.2m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 276594637,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -22,8 +46,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 281.6s: EPV 3750004.5m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 281595637,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -36,8 +85,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 286.8s: EPV 3750004.5m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 286798899,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -50,8 +124,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 292.0s: EPV 3750004.8m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 291994636,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -64,8 +163,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 297.0s: EPV 3750005.0m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 296994639,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -78,8 +202,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 302.2s: EPV 3750005.2m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 302194643,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -92,8 +241,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 307.2s: EPV 3750005.2m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 307196637,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -106,8 +280,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 312.4s: EPV 3750005.5m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 312394638,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -120,8 +319,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 317.4s: EPV 3750005.8m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 317395912,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -134,8 +358,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 322.4s: EPV 3750005.8m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 322396069,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -148,8 +397,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 327.4s: EPV 3750006.0m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 327397637,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
@@ -162,8 +436,33 @@ expression: diags
     "id": "gps_interference",
     "summary": "GPS quality degraded at 332.6s: EPV 3750006.0m",
     "severity": "critical",
+    "kind": "point",
     "timestamp_us": 332595636,
     "end_timestamp_us": null,
+    "anchor": {
+      "topic": "vehicle_gps_position",
+      "field": "eph"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "eph_m",
+          "unit": "meters"
+        },
+        {
+          "name": "epv_m",
+          "unit": "meters"
+        },
+        {
+          "name": "num_satellites",
+          "unit": "count"
+        },
+        {
+          "name": "noise_level",
+          "unit": "ratio"
+        }
+      ]
+    },
     "evidence": {
       "type": "GpsInterference",
       "eph_m": 4294967.5,
