@@ -286,4 +286,3 @@ pub fn create_analyzers_filtered(ids: &[String]) -> Result<Vec<Box<dyn Analyzer>
     }
     Ok(selected)
 }
-

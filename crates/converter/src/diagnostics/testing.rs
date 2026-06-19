@@ -231,3 +231,86 @@ pub fn assert_no_false_positives(fixture: &str, diagnostic_id: &str) {
         diags
     );
 }
+
+/// Assert descriptor field names == evidence JSON keys (minus "type" tag)
+/// for every analyzer with a `{id}.ulg` fixture.
+#[test]
+fn descriptor_fields_match_evidence_keys() {
+    use std::collections::BTreeSet;
+
+    let analyzers = super::create_analyzers();
+    let mut tested = Vec::new();
+    let mut skipped = Vec::new();
+
+    for analyzer in analyzers {
+        let id = analyzer.id().to_string();
+        let descriptor = analyzer.output_descriptor();
+
+        // Discover fixture by convention
+        let fixture_name = format!("{}.ulg", id);
+        let fixture_file = fixture_path(&fixture_name);
+        if !std::path::Path::new(&fixture_file).exists() {
+            skipped.push(id);
+            continue;
+        }
+
+        let diags = analyze_fixture_for(&fixture_name, &id);
+        assert!(
+            !diags.is_empty(),
+            "analyzer '{}' produced no diagnostics from fixture '{}' — \
+             can't verify descriptor parity",
+            id, fixture_name,
+        );
+
+        let descriptor_names: BTreeSet<String> = descriptor
+            .fields
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+
+        for diag in &diags {
+            let evidence_json = serde_json::to_value(&diag.evidence)
+                .expect("Evidence must serialize");
+            let evidence_obj = evidence_json
+                .as_object()
+                .expect("Evidence must serialize to JSON object");
+
+            let evidence_names: BTreeSet<String> = evidence_obj
+                .keys()
+                .filter(|k| *k != "type")
+                .cloned()
+                .collect();
+
+            assert_eq!(
+                descriptor_names, evidence_names,
+                "descriptor/evidence field mismatch for '{}'\n\
+                 descriptor declares: {:?}\n\
+                 evidence contains:   {:?}\n\
+                 missing from descriptor: {:?}\n\
+                 extra in descriptor:     {:?}",
+                id,
+                descriptor_names,
+                evidence_names,
+                evidence_names.difference(&descriptor_names).collect::<Vec<_>>(),
+                descriptor_names.difference(&evidence_names).collect::<Vec<_>>(),
+            );
+        }
+
+        tested.push(id);
+    }
+
+    // Ensure we actually tested something — if all analyzers are skipped,
+    // this test is vacuous and should fail loudly.
+    assert!(
+        !tested.is_empty(),
+        "no analyzers were tested — all skipped: {:?}",
+        skipped,
+    );
+
+    if !skipped.is_empty() {
+        eprintln!(
+            "NOTE: skipped descriptor parity check for analyzers without fixtures: {:?}",
+            skipped,
+        );
+    }
+}

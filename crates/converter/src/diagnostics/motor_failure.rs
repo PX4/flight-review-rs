@@ -208,6 +208,7 @@ impl Analyzer for MotorFailureAnalyzer {
             .field("motor_index", FieldUnit::Count)
             .field("pwm_value", FieldUnit::Pwm)
             .field("flight_mode", FieldUnit::Label)
+            .field("mode", FieldUnit::Label)
     }
 }
 
