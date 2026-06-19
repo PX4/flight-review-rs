@@ -13,7 +13,10 @@
 //! - Combined with high `combined_test_ratio` on an instance that the
 //!   selector switches to (indicates switching to a degraded instance)
 
-use super::{parse_field, Analyzer, Diagnostic, Evidence, Severity};
+use super::{
+    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    PlotAnchor, Severity,
+};
 use px4_ulog::stream_parser::model::DataMessage;
 use std::collections::VecDeque;
 
@@ -218,8 +221,13 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
                 id: "ekf_selector_whipsaw".to_string(),
                 summary,
                 severity,
+                kind: AnomalyKind::Region { end_timestamp_us: ts },
                 timestamp_us: window_start,
-                end_timestamp_us: Some(ts),
+                anchor: PlotAnchor::new(
+                    "estimator_selector_status",
+                    "instance_changed_count",
+                ),
+                descriptor: self.output_descriptor(),
                 evidence: Evidence::EkfSelectorWhipsaw {
                     switch_count: switches_in_window,
                     window_duration_ms: window_duration_us / 1_000,
@@ -233,6 +241,15 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
 
     fn finish(self: Box<Self>) -> Vec<Diagnostic> {
         self.detections
+    }
+
+    fn output_descriptor(&self) -> OutputDescriptor {
+        OutputDescriptor::new()
+            .field("switch_count", FieldUnit::Count)
+            .field("window_duration_ms", FieldUnit::Milliseconds)
+            .field("avg_switch_interval_ms", FieldUnit::Milliseconds)
+            .field("switched_to_degraded", FieldUnit::Label)
+            .field("primary_instance_test_ratio", FieldUnit::Ratio)
     }
 }
 
