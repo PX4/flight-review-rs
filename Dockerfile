@@ -6,8 +6,9 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-# Build release binary with PostgreSQL support
-RUN cargo build --release -p flight-review-server --features postgres \
+# Build release binary with PostgreSQL support by default
+ARG SERVER_FEATURES=postgres
+RUN cargo build --release -p flight-review-server --features "$SERVER_FEATURES" \
     && cargo build --release -p flight-review --bin ulog-convert
 
 # Runtime image — minimal, no Rust toolchain
