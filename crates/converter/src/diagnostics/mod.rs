@@ -29,8 +29,6 @@ pub mod testing;
 /// reprocessing of historical logs.
 pub const ANALYSIS_VERSION: u32 = 2;
 
-// ── Output descriptor types ───────────────────────────────────────────
-
 /// Whether a diagnostic marks an instant or spans a time window.
 ///
 /// `end_timestamp_us` lives on `Region` — a point cannot have an end,
@@ -118,8 +116,6 @@ impl Default for OutputDescriptor {
         Self::new()
     }
 }
-
-// ── Core diagnostic types ─────────────────────────────────────────────
 
 /// Severity of a detected anomaly.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
