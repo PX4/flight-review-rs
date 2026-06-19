@@ -215,7 +215,10 @@ pub async fn upload(
                     severity: format!("{:?}", d.severity).to_lowercase(),
                     summary: d.summary.clone(),
                     timestamp_us: Some(d.timestamp_us as i64),
-                    end_timestamp_us: d.end_timestamp_us.map(|t| t as i64),
+                    end_timestamp_us: match &d.kind {
+                        flight_review::diagnostics::AnomalyKind::Region { end_timestamp_us } => Some(*end_timestamp_us as i64),
+                        flight_review::diagnostics::AnomalyKind::Point => None,
+                    },
                     evidence: serde_json::to_string(&d.evidence).ok(),
                 })
                 .collect();
