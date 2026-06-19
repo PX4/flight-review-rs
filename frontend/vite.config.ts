@@ -6,16 +6,15 @@ import { join } from 'node:path';
 import type { Plugin } from 'vite';
 
 /**
- * Serve DuckDB worker source-map files from node_modules during dev.
+ * Serve DuckDB-WASM bundle files (workers, wasm, source maps) from node_modules
+ * under /duckdb/* during dev.
  *
- * The DuckDB WASM worker is loaded via a blob URL (fetched from a CDN).
- * The worker script contains a `//# sourceMappingURL=<file>.map` comment,
- * which the browser resolves relative to the page origin, hitting the Vite
- * dev server and producing a 404. This plugin intercepts those requests and
- * serves the corresponding .map file from the installed package.
+ * Loading workers/wasm from the jsDelivr CDN breaks in Safari: the worker is
+ * created from a blob URL with an opaque origin, and subsequent fetches for
+ * the .wasm module are blocked. Serving everything same-origin avoids this.
  */
-function duckdbWorkerSourcemaps(): Plugin {
-  const DUCKDB_MAP_RE = /^\/(duckdb-browser-.+\.worker\.js\.map)$/;
+function duckdbAssets(): Plugin {
+  const DUCKDB_RE = /^\/duckdb\/(duckdb-[A-Za-z0-9._-]+)$/;
   const distDir = join(
     __dirname,
     'node_modules',
@@ -24,16 +23,24 @@ function duckdbWorkerSourcemaps(): Plugin {
     'dist',
   );
 
+  const contentType = (file: string): string => {
+    if (file.endsWith('.wasm')) return 'application/wasm';
+    if (file.endsWith('.js')) return 'application/javascript';
+    if (file.endsWith('.map')) return 'application/json';
+    return 'application/octet-stream';
+  };
+
   return {
-    name: 'duckdb-worker-sourcemaps',
+    name: 'duckdb-assets',
     apply: 'serve', // dev only
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const match = req.url && DUCKDB_MAP_RE.exec(req.url);
+        const match = req.url && DUCKDB_RE.exec(req.url.split('?')[0]);
         if (!match) return next();
         try {
           const content = readFileSync(join(distDir, match[1]));
-          res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Content-Type', contentType(match[1]));
+          res.setHeader('Cache-Control', 'no-cache');
           res.end(content);
         } catch {
           next();
@@ -44,7 +51,7 @@ function duckdbWorkerSourcemaps(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [duckdbWorkerSourcemaps(), tailwindcss(), sveltekit()],
+  plugins: [duckdbAssets(), tailwindcss(), sveltekit()],
   server: {
     proxy: {
       '/api': {

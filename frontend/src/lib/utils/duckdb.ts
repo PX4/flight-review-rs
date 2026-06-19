@@ -1,19 +1,35 @@
-import type { AsyncDuckDB, AsyncDuckDBConnection } from '@duckdb/duckdb-wasm';
+import type { AsyncDuckDB, AsyncDuckDBConnection, DuckDBBundles } from '@duckdb/duckdb-wasm';
 
 let dbInstance: AsyncDuckDB | null = null;
+
+// Same-origin bundle map. Files are served from /duckdb/* — by the Vite dev
+// plugin in dev, and from static/duckdb/ in prod (synced at build time).
+// Loading from a CDN breaks Safari because the worker ends up with an opaque
+// origin and can't fetch the .wasm module.
+function getBundles(): DuckDBBundles {
+  return {
+    mvp: {
+      mainModule: '/duckdb/duckdb-mvp.wasm',
+      mainWorker: '/duckdb/duckdb-browser-mvp.worker.js',
+    },
+    eh: {
+      mainModule: '/duckdb/duckdb-eh.wasm',
+      mainWorker: '/duckdb/duckdb-browser-eh.worker.js',
+    },
+    coi: {
+      mainModule: '/duckdb/duckdb-coi.wasm',
+      mainWorker: '/duckdb/duckdb-browser-coi.worker.js',
+      pthreadWorker: '/duckdb/duckdb-browser-coi.pthread.worker.js',
+    },
+  };
+}
 
 export async function initDuckDB(): Promise<AsyncDuckDB> {
   if (dbInstance) return dbInstance;
   const duckdb = await import('@duckdb/duckdb-wasm');
-  const BUNDLES = duckdb.getJsDelivrBundles();
-  const bundle = await duckdb.selectBundle(BUNDLES);
+  const bundle = await duckdb.selectBundle(getBundles());
 
-  // Fetch the worker script as a blob to avoid cross-origin Worker restrictions.
-  // Creating a Worker directly from a CDN URL fails when the page is on a different origin.
-  const workerScript = await fetch(bundle.mainWorker!).then((r) => r.blob());
-  const workerUrl = URL.createObjectURL(workerScript);
-  const worker = new Worker(workerUrl);
-
+  const worker = new Worker(bundle.mainWorker!);
   const logger = new duckdb.ConsoleLogger();
   const db = new duckdb.AsyncDuckDB(logger, worker);
   await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
