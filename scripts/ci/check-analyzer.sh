@@ -38,10 +38,14 @@ if [[ "${1:-}" == "--changed-only" ]]; then
     changed_files=$(git diff --name-only origin/main...HEAD -- "$DIAG_DIR/" 2>/dev/null || \
                     git diff --name-only HEAD~1 -- "$DIAG_DIR/" 2>/dev/null || echo "")
 
-    # Extract unique analyzer names from changed paths
+    # Extract unique analyzer names from changed paths.
+    # `grep -v` exits 1 when nothing matches (e.g. only a snapshot or fixture
+    # changed, so sed produced no analyzer names); under `set -e` + `pipefail`
+    # that would abort the whole script before the "nothing changed" check
+    # below. `|| true` keeps an empty result from failing the pipeline.
     analyzer_names=$(echo "$changed_files" \
         | sed -n 's|^crates/converter/src/diagnostics/\([^/.]*\)\.rs$|\1|p' \
-        | grep -v -E '^(mod|testing)$' \
+        | { grep -v -E '^(mod|testing)$' || true; } \
         | sort -u)
 
     analyzer_files=""
