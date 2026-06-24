@@ -1,10 +1,19 @@
 name: Docker
 
 on:
-  push:
-    branches: [main]
+  # Only run when something that actually affects the image changes. The build
+  # is the slowest job in CI (~8 min, full workspace recompile) and the image
+  # is built-and-discarded on PRs (push: false), so running it on every change
+  # was wasted time. release.yml still builds and publishes on version tags.
   pull_request:
     branches: [main]
+    paths:
+      - 'Dockerfile'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'crates/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
 
 jobs:
   build:
