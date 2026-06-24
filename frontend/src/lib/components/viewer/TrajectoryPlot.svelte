@@ -143,7 +143,11 @@
 		lastWidth = cssW;
 		const cssH = plotHeight;
 
-		canvas.style.width = `${cssW}px`;
+		// Don't set canvas.style.width — the `w-full` class sizes the canvas
+		// from layout. Pinning an explicit px width here props the container
+		// open and stops it from ever shrinking (the ResizeObserver would
+		// then never see a smaller width). Only the backing store and height
+		// are set imperatively.
 		canvas.style.height = `${cssH}px`;
 		canvas.width = Math.floor(cssW * dpr);
 		canvas.height = Math.floor(cssH * dpr);

@@ -194,8 +194,8 @@
 		</div>
 
 		<!-- Main area: content -->
-		<div class="flex flex-1 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
-			<div class="flex-1 flex flex-col {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
+		<div class="flex flex-1 min-w-0 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
+			<div class="flex-1 flex flex-col min-w-0 {activeTab === '/map' ? 'min-h-0 overflow-hidden' : ''}">
 				<!-- Panel content (from child route) -->
 				<div class="{activeTab === '/map' ? 'flex-1 flex flex-col min-h-0' : ''} p-3 sm:p-4 space-y-4 overflow-x-hidden">
 					{@render children()}

@@ -27,6 +27,12 @@
 	let uplot: uPlot | null = null;
 	let resizeObserver: ResizeObserver | null = null;
 
+	// The chart's available width, from the element uPlot renders into. clientWidth
+	// is post-layout and excludes scrollbars, so the plot never exceeds its column.
+	function measuredWidth(): number {
+		return chartEl?.clientWidth || containerEl?.clientWidth || 800;
+	}
+
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let plotHeight = $state(300);
@@ -86,7 +92,9 @@
 
 			const data: uPlot.AlignedData = [result.timestamps, ...result.series];
 
-			const containerWidth = containerEl?.clientWidth ?? 800;
+			// clientWidth is the post-layout, clip-aware inner width, so the plot
+			// is never created wider than the column actually allows.
+			const containerWidth = measuredWidth();
 			plotHeight = containerWidth < 640 ? 180 : 300;
 
 			// Destroy previous chart if any
@@ -154,6 +162,18 @@
 
 			if (chartEl) {
 				uplot = new uPlot(opts, data, chartEl);
+				// Layout may still be settling when the chart is first created
+				// (async data load can resolve before the column reaches its
+				// final width). Re-measure on the next frame and correct, so the
+				// plot never stays wider than its container.
+				requestAnimationFrame(() => {
+					if (!uplot) return;
+					const w = measuredWidth();
+					if (w > 0 && w !== uplot.width) {
+						plotHeight = w < 640 ? 180 : 300;
+						uplot.setSize({ width: w, height: plotHeight });
+					}
+				});
 			}
 
 			loading = false;
