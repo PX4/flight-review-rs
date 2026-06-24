@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { FlightMetadata } from '$lib/types';
-	import { formatDuration, parseFlightDateFromFilename, formatFlightDateTime } from '$lib/utils/formatters';
+	import { formatDuration, parseFlightDateFromFilename, formatRelativeTime } from '$lib/utils/formatters';
 	import { getHardwareName } from '$lib/utils/hardwareNames';
 
 	let { metadata, logId, vehicleType, locationName, filename, createdAt } = $props<{ metadata: FlightMetadata; logId: string; vehicleType?: string | null; locationName?: string | null; filename?: string | null; createdAt?: string | null }>();
@@ -15,7 +15,7 @@
 		}
 		return null;
 	});
-	const flightDateParts = $derived(flightDate ? formatFlightDateTime(flightDate.date) : null);
+	const flightDateRelative = $derived(flightDate ? formatRelativeTime(flightDate.date.toISOString()) : null);
 	const flightDateLabel = $derived(flightDate?.source === 'upload' ? 'Uploaded' : 'Flight Date');
 	const flightDateTooltip = $derived(flightDate ? flightDate.date.toLocaleString() : '');
 
@@ -97,18 +97,18 @@
 					{#if location.city}<dd class="text-[10px] text-gray-500 whitespace-nowrap">{location.city}</dd>{/if}
 				</div>
 			{:else}
-				<svg class="size-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+				<svg class="size-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" role="img" aria-label="No location data">
+					<title>No location data</title>
 					<path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
 					<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
 					<path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
 				</svg>
-				<dd class="text-xs text-gray-400 whitespace-nowrap">No Location</dd>
 			{/if}
 		</div>
-		{#if flightDateParts}
+		{#if flightDateRelative}
 			<div class="shrink-0 px-3 py-1.5" title={flightDateTooltip}>
 				<dt class="text-[10px] text-gray-500">{flightDateLabel}</dt>
-				<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{flightDateParts.date} <span class="text-gray-500">{flightDateParts.time}</span></dd>
+				<dd class="text-xs font-medium text-gray-700 whitespace-nowrap">{flightDateRelative}</dd>
 			</div>
 		{/if}
 		<div class="shrink-0 px-3 py-1.5">
@@ -161,13 +161,13 @@
 			</a>
 		</div>
 	</dl>
-	<!-- Desktop: flex layout -->
-	<dl class="hidden lg:flex lg:divide-x divide-gray-200 lg:px-0">
-		<div class="px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-3">
+	<!-- Desktop: flex layout, scrolls horizontally when it can't all fit -->
+	<dl class="hidden lg:flex overflow-x-auto lg:divide-x divide-gray-200 lg:px-0 scrollbar-none">
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-3">
 			<img src={vehicleIconPath(vehicleType)} alt={vehicleType ?? ''} class="size-10 opacity-70" />
 			<dd class="text-sm font-semibold text-gray-900 whitespace-nowrap">{vehicleType ?? metadata.sys_name ?? '\u2014'}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-2">
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3 flex items-center gap-2">
 			{#if location}
 				{#if location.flag}<span class="text-2xl">{location.flag}</span>{/if}
 				<div class="flex flex-col">
@@ -175,50 +175,50 @@
 					{#if location.city}<dd class="text-xs text-gray-500 whitespace-nowrap">{location.city}</dd>{/if}
 				</div>
 			{:else}
-				<svg class="size-5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+				<svg class="size-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" role="img" aria-label="No location data">
+					<title>No location data</title>
 					<path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
 					<path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
 					<path stroke-linecap="round" stroke-linejoin="round" d="M3 3l18 18" />
 				</svg>
-				<dd class="text-sm text-gray-400 whitespace-nowrap">No Location</dd>
 			{/if}
 		</div>
-		{#if flightDateParts}
-			<div class="px-2 lg:px-4 py-2 lg:py-3" title={flightDateTooltip}>
-				<dt class="text-xs text-gray-500">{flightDateLabel}</dt>
-				<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{flightDateParts.date} <span class="text-gray-500">{flightDateParts.time}</span></dd>
+		{#if flightDateRelative}
+			<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3" title={flightDateTooltip}>
+				<dt class="text-xs text-gray-500 whitespace-nowrap">{flightDateLabel}</dt>
+				<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{flightDateRelative}</dd>
 			</div>
 		{/if}
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Hardware</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5 truncate" title={metadata.ver_hw ?? ''}>{getHardwareName(metadata.ver_hw)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Hardware</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap" title={metadata.ver_hw ?? ''}>{getHardwareName(metadata.ver_hw)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Firmware</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5 truncate">{metadata.ver_sw_release_str ?? '\u2014'}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Firmware</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{metadata.ver_sw_release_str ?? '\u2014'}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Duration</dt>
-			<dd class="text-sm font-semibold text-gray-900 mt-0.5">{formatDuration(metadata.flight_duration_s)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Duration</dt>
+			<dd class="text-sm font-semibold text-gray-900 mt-0.5 whitespace-nowrap">{formatDuration(metadata.flight_duration_s)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Distance</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">{formatDistance(stats?.total_distance_m)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Distance</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{formatDistance(stats?.total_distance_m)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Max Alt</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">{formatAltitude(stats?.max_altitude_diff_m)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Max Alt</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{formatAltitude(stats?.max_altitude_diff_m)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Max Speed</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">{formatSpeed(stats?.max_speed_m_s)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Max Speed</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{formatSpeed(stats?.max_speed_m_s)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Battery</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">{formatBattery(battery?.discharged_mah)}</dd>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Battery</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">{formatBattery(battery?.discharged_mah)}</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">Vibration</dt>
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">Vibration</dt>
 			<dd class="mt-0.5">
 				{#if vibe.bg}
 					<span class="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium {vibe.bg} {vibe.fg}">{vibe.text}</span>
@@ -227,13 +227,13 @@
 				{/if}
 			</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3">
-			<dt class="text-xs text-gray-500">GPS</dt>
-			<dd class="text-sm font-medium text-gray-700 mt-0.5">
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3">
+			<dt class="text-xs text-gray-500 whitespace-nowrap">GPS</dt>
+			<dd class="text-sm font-medium text-gray-700 mt-0.5 whitespace-nowrap">
 				{gps?.max_satellites != null ? `${gps.max_satellites} sats` : '\u2014'}
 			</dd>
 		</div>
-		<div class="px-2 lg:px-4 py-2 lg:py-3 flex items-end">
+		<div class="shrink-0 px-2 lg:px-4 py-2 lg:py-3 flex items-end">
 			<a
 				href="/api/logs/{logId}/download"
 				class="rounded-md bg-white px-3 py-1.5 text-xs font-medium text-gray-700 ring-1 ring-gray-300 hover:bg-gray-50 flex items-center gap-1.5"
