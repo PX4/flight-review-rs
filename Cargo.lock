@@ -2313,9 +2313,9 @@ dependencies = [
 
 [[package]]
 name = "px4-ulog"
-version = "0.5.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fef6eb88b448990245f7ad0bf05f5289f8745ad3b727be5e0aac25ba6f7b557"
+checksum = "d31986c7f5754792e62c15b93cc5e9c5affdd867a33cb868b84e7dea0d8e70e5"
 dependencies = [
  "byteorder",
 ]

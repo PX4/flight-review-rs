@@ -60,6 +60,36 @@ pub struct ChangedParam {
     pub in_flight: bool,
 }
 
+/// How the ULog data section ended. Mirrors `px4_ulog::full_parser::Completeness`
+/// (which isn't `Serialize`) so the outcome can be baked into `metadata.json`.
+/// PX4 logs are routinely cut off in the field (power loss, SD card pulled while
+/// armed, firmware crash mid-write); a truncated tail still leaves a usable flight,
+/// so we record the state rather than discarding the log.
+///
+/// Serializes as `"complete"`, `"truncated"`, or `{ "malformed_record": "..." }`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Completeness {
+    /// The data section ended on a clean record boundary. Nothing was lost.
+    #[default]
+    Complete,
+    /// The file ended partway through a record (classic power-loss / yanked-SD cut).
+    Truncated,
+    /// A complete-looking record failed to parse (corruption, schema mismatch).
+    MalformedRecord(String),
+}
+
+impl From<px4_ulog::full_parser::Completeness> for Completeness {
+    fn from(c: px4_ulog::full_parser::Completeness) -> Self {
+        use px4_ulog::full_parser::Completeness as P;
+        match c {
+            P::Complete => Completeness::Complete,
+            P::Truncated => Completeness::Truncated,
+            P::MalformedRecord(s) => Completeness::MalformedRecord(s),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlightMetadata {
     /// System name (e.g., "PX4")
@@ -127,6 +157,9 @@ pub struct FlightMetadata {
     pub gps_first_fix: Option<GpsPosition>,
     /// Flight analysis data (computed from a second streaming pass)
     pub analysis: Option<crate::analysis::FlightAnalysis>,
+    /// How the log's data section ended. `Truncated` / `MalformedRecord` mean the
+    /// file was cut off or corrupt and the data above is the recovered valid prefix.
+    pub completeness: Completeness,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -103,7 +103,8 @@ impl Manifest {
 pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult, ConvertError> {
     std::fs::create_dir_all(output_dir).map_err(ConvertError::Parse)?;
 
-    // Parse the ULog file
+    // Parse the ULog file. A truncated or malformed tail no longer fails the
+    // whole parse — read_file returns the valid prefix plus how it ended.
     let parsed = px4_ulog::full_parser::read_file(input_path)?;
 
     // Extract metadata via the streaming parser
@@ -112,6 +113,10 @@ pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult
     // Run flight analysis (second streaming pass)
     let analysis = crate::analysis::analyze(input_path, &metadata)?;
     metadata.analysis = Some(analysis);
+
+    // Record how the log ended (complete / truncated / malformed). The full parse
+    // above is authoritative; the streaming passes also recover their prefixes.
+    metadata.completeness = parsed.completeness.clone().into();
 
     // Convert each topic to a Parquet file
     let mut parquet_files = Vec::new();
