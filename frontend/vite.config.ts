@@ -2,8 +2,39 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vitest/config';
 import { readFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import type { Plugin } from 'vite';
+
+// Build-time version info baked into the bundle and shown in the nav's version
+// panel. Git calls are guarded so `npm run dev` still works outside a repo or
+// without git installed.
+const pkgVersion = (() => {
+  try {
+    return JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf-8')).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+
+function safeGit(args: string): string {
+  try {
+    return execSync(`git ${args}`, { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return 'unknown';
+  }
+}
+
+const gitSha = (() => {
+  const sha = safeGit('rev-parse --short HEAD');
+  if (sha === 'unknown') return sha;
+  const dirty = safeGit('status --porcelain');
+  return dirty && dirty !== 'unknown' ? `${sha}-dirty` : sha;
+})();
+
+const buildTime = new Date().toISOString();
 
 /**
  * Serve DuckDB-WASM bundle files (workers, wasm, source maps) from node_modules
@@ -52,6 +83,11 @@ function duckdbAssets(): Plugin {
 
 export default defineConfig({
   plugins: [duckdbAssets(), tailwindcss(), sveltekit()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+    __GIT_SHA__: JSON.stringify(gitSha),
+    __BUILD_TIME__: JSON.stringify(buildTime),
+  },
   server: {
     proxy: {
       '/api': {

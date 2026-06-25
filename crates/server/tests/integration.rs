@@ -65,36 +65,9 @@ async fn start_server() -> (String, tokio::task::JoinHandle<()>) {
         http_client: reqwest::Client::new(),
     });
 
-    use axum::{
-        extract::DefaultBodyLimit,
-        routing::{get, post},
-        Router,
-    };
-    use tower_http::cors::CorsLayer;
-
-    let app = Router::new()
-        .route("/health", get(flight_review_server::api::health::health))
-        .route(
-            "/api/upload",
-            post(flight_review_server::api::upload::upload)
-                .layer(DefaultBodyLimit::max(512 * 1024 * 1024)),
-        )
-        .route("/api/logs", get(flight_review_server::api::logs::list_logs))
-        .route(
-            "/api/logs/{id}",
-            get(flight_review_server::api::logs::get_log)
-                .delete(flight_review_server::api::logs::delete_log),
-        )
-        .route(
-            "/api/logs/{id}/data/{filename}",
-            get(flight_review_server::api::logs::get_log_file),
-        )
-        .route(
-            "/api/stats",
-            get(flight_review_server::api::stats::get_stats),
-        )
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    // Use the same router the binary serves, so the test never drifts from
+    // the real route table.
+    let app = flight_review_server::build_router(state);
 
     let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
         .await
@@ -132,6 +105,23 @@ async fn test_full_lifecycle() {
     assert_eq!(resp.status(), 200);
     let body: Value = resp.json().await.unwrap();
     assert_eq!(body["status"], "ok");
+
+    // 1b. Version info — all five fields present and non-empty.
+    let resp = client
+        .get(format!("{}/api/version", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let body: Value = resp.json().await.unwrap();
+    for field in ["server", "converter", "px4_ulog", "git_sha", "build_time"] {
+        let v = body[field].as_str();
+        assert!(
+            v.is_some_and(|s| !s.is_empty()),
+            "version field '{field}' missing or empty: {body:?}"
+        );
+    }
+    assert_eq!(body["px4_ulog"], "0.6.1", "px4-ulog version should match Cargo.lock");
 
     // 2. Upload a log
     let fixture = fixture_path("sample.ulg");

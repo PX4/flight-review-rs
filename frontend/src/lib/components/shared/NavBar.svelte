@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { darkMode } from '$lib/stores/theme';
+	import VersionBadge from './VersionBadge.svelte';
 
 	let { currentPath } = $props<{ currentPath: string }>();
 
@@ -113,7 +114,7 @@
 							Dark mode
 						{/if}
 					</button>
-					<span class="block text-xs font-medium text-gray-400 dark:text-gray-500">v2.0</span>
+					<VersionBadge />
 				</li>
 			</ul>
 		</nav>
@@ -210,7 +211,7 @@
 				</ul>
 			</nav>
 			<div class="mt-8">
-				<span class="text-xs font-medium text-gray-400 dark:text-gray-500">v2.0</span>
+				<VersionBadge />
 			</div>
 		</div>
 	</div>

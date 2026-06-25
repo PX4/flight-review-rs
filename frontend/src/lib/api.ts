@@ -1,4 +1,4 @@
-import type { LogRecord, ListFilters, ListResponse, UploadOptions, UploadResponse, FlightMetadata, StatsResponse } from './types';
+import type { LogRecord, ListFilters, ListResponse, UploadOptions, UploadResponse, FlightMetadata, StatsResponse, VersionInfo } from './types';
 
 const BASE = '/api';
 
@@ -20,6 +20,10 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function getLog(id: string): Promise<LogRecord> {
   return apiFetch(`/logs/${id}`);
+}
+
+export async function getVersion(): Promise<VersionInfo> {
+  return apiFetch('/version');
 }
 
 export async function listLogs(filters: ListFilters): Promise<ListResponse> {

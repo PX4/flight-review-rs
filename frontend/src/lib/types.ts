@@ -78,6 +78,16 @@ export interface UploadResponse {
   parquet_files: string[];
 }
 
+/// Backend version info from GET /api/version. The frontend reports its own
+/// version separately (baked in at build time via Vite define).
+export interface VersionInfo {
+  server: string;
+  converter: string;
+  px4_ulog: string;
+  git_sha: string;
+  build_time: string;
+}
+
 // --- Metadata types ---
 
 export interface FlightMetadata {

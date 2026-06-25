@@ -1,15 +1,9 @@
-use axum::{
-    extract::DefaultBodyLimit,
-    routing::{get, post},
-    Router,
-};
 use clap::{Args, Parser, Subcommand};
 use std::sync::Arc;
 use tokio::net::TcpListener;
-use tower_http::cors::CorsLayer;
 use tracing_subscriber::EnvFilter;
 
-use flight_review_server::{api, db, storage::FileStorage, AppState};
+use flight_review_server::{db, storage::FileStorage, AppState};
 
 #[derive(Parser)]
 #[command(version, about = "Flight Review v2 server")]
@@ -90,8 +84,12 @@ async fn main() {
 
 async fn run_server(config: ServeConfig) {
     tracing::info!(
-        "flight-review-server v{}",
-        env!("CARGO_PKG_VERSION")
+        "flight-review-server v{} (converter {}, px4-ulog {}, git {}, built {})",
+        env!("CARGO_PKG_VERSION"),
+        flight_review::VERSION,
+        flight_review::PX4_ULOG_VERSION,
+        env!("GIT_SHA"),
+        env!("BUILD_TIME"),
     );
     tracing::info!("db:      {}", config.db);
     tracing::info!("storage: {}", config.storage);
@@ -118,24 +116,7 @@ async fn run_server(config: ServeConfig) {
         http_client: reqwest::Client::new(),
     });
 
-    let app = Router::new()
-        .route("/health", get(api::health::health))
-        .route("/api/upload", post(api::upload::upload)
-            .layer(DefaultBodyLimit::max(512 * 1024 * 1024))) // 512 MB
-        .route("/api/logs", get(api::logs::list_logs))
-        .route("/api/logs/facets", get(api::logs::list_facets))
-        .route("/api/stats", get(api::stats::get_stats))
-        .route(
-            "/api/logs/{id}",
-            get(api::logs::get_log).delete(api::logs::delete_log),
-        )
-        .route("/api/logs/{id}/track", get(api::logs::get_track))
-        .route(
-            "/api/logs/{id}/data/{filename}",
-            get(api::logs::get_log_file),
-        )
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    let app = flight_review_server::build_router(state);
 
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr)
