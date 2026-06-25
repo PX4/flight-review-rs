@@ -44,41 +44,19 @@ fn run_git(args: &[&str]) -> Option<String> {
 }
 
 /// Build time as an ISO-8601 UTC string. Honors `SOURCE_DATE_EPOCH` for
-/// reproducible builds; otherwise uses the wall clock. Formatted without a date
-/// library to avoid a build-dependency.
+/// reproducible builds; otherwise uses the wall clock. `unknown` if neither is
+/// available.
 fn build_time() -> String {
     let secs = std::env::var("SOURCE_DATE_EPOCH")
         .ok()
-        .and_then(|s| s.parse::<u64>().ok())
+        .and_then(|s| s.parse::<i64>().ok())
         .or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .ok()
-                .map(|d| d.as_secs())
+                .map(|d| d.as_secs() as i64)
         });
-    match secs {
-        Some(secs) => format_iso8601_utc(secs),
-        None => "unknown".to_string(),
-    }
-}
-
-/// Format Unix seconds as `YYYY-MM-DDTHH:MM:SSZ` (UTC, proleptic Gregorian).
-fn format_iso8601_utc(secs: u64) -> String {
-    let days = secs / 86_400;
-    let rem = secs % 86_400;
-    let (hour, min, sec) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-
-    // Civil-from-days (Howard Hinnant's algorithm), epoch 1970-01-01.
-    let z = days as i64 + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = if month <= 2 { y + 1 } else { y };
-
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}Z")
+    secs.and_then(|s| chrono::DateTime::from_timestamp(s, 0))
+        .map(|dt| dt.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        .unwrap_or_else(|| "unknown".to_string())
 }

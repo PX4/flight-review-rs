@@ -32,5 +32,9 @@ futures = "0.3"
 tempfile = "3"
 reqwest = { version = "0.12", features = ["json"] }
 
+[build-dependencies]
+# Already a runtime dependency above; used in build.rs to format the build time.
+chrono = { version = "0.4", default-features = false, features = ["alloc"] }
+
 [dev-dependencies]
 reqwest = { version = "0.12", features = ["json", "multipart"] }
