@@ -1,0 +1,5 @@
+---
+source: crates/converter/src/diagnostics/tecs_nonfinite_pitch.rs
+expression: diags
+---
+[]

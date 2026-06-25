@@ -1,0 +1,38 @@
+---
+source: crates/converter/src/diagnostics/tecs_nonfinite_pitch.rs
+expression: diags
+---
+[
+  {
+    "id": "tecs_nonfinite_pitch",
+    "summary": "TECS pitch_integ became non-finite (NaN) at 1029.9s and never recovered — aircraft loses pitch control",
+    "severity": "critical",
+    "kind": {
+      "region": {
+        "end_timestamp_us": 1035319434
+      }
+    },
+    "timestamp_us": 1029918348,
+    "anchor": {
+      "topic": "tecs_status",
+      "field": "pitch_integ"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "field",
+          "unit": "label"
+        },
+        {
+          "name": "throttle_integ_nonfinite",
+          "unit": "label"
+        }
+      ]
+    },
+    "evidence": {
+      "type": "TecsNonfinitePitch",
+      "field": "pitch_integ",
+      "throttle_integ_nonfinite": false
+    }
+  }
+]

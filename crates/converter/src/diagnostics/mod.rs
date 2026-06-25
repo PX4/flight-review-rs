@@ -22,12 +22,13 @@ pub mod ekf_selector_whipsaw;
 pub mod gps_interference;
 pub mod motor_failure;
 pub mod rc_loss;
+pub mod tecs_nonfinite_pitch;
 #[cfg(test)]
 pub mod testing;
 
 /// Current analysis version. Bump when the analyzer set changes to trigger
 /// reprocessing of historical logs.
-pub const ANALYSIS_VERSION: u32 = 2;
+pub const ANALYSIS_VERSION: u32 = 3;
 
 /// Whether a diagnostic marks an instant or spans a time window.
 ///
@@ -137,6 +138,16 @@ pub enum MotorFailureMode {
     LockedAtMax,
 }
 
+/// Which TECS field first went non-finite — typed discriminant.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TecsNonfinitePitchField {
+    /// `tecs_status.pitch_integ` — the integrator, where the NaN latches first.
+    PitchInteg,
+    /// `tecs_status.pitch_sp_rad` — the pitch setpoint the NaN propagates into.
+    PitchSpRad,
+}
+
 /// Typed evidence for each diagnostic kind.
 ///
 /// Every analyzer returns a specific variant — not a freeform map.
@@ -186,6 +197,13 @@ pub enum Evidence {
         switched_to_degraded: bool,
         /// combined_test_ratio of the primary instance at detection time.
         primary_instance_test_ratio: f32,
+    },
+    TecsNonfinitePitch {
+        /// Which field first went non-finite (integrator or setpoint).
+        field: TecsNonfinitePitchField,
+        /// True if `throttle_integ` was also non-finite at the same sample —
+        /// a sibling-channel sanity check that the whole TECS state corrupted.
+        throttle_integ_nonfinite: bool,
     },
 }
 
@@ -256,6 +274,7 @@ pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
         Box::new(ekf_failure::EkfFailureAnalyzer::new()),
         Box::new(rc_loss::RcLossAnalyzer::new()),
         Box::new(ekf_selector_whipsaw::EkfSelectorWhipsawAnalyzer::new()),
+        Box::new(tecs_nonfinite_pitch::TecsNonfinitePitchAnalyzer::new()),
     ]
 }
 
