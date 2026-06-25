@@ -272,7 +272,7 @@ fn build_where_postgres(filters: &ListFilters) -> (String, Vec<String>, usize) {
     let mut param_idx: usize = 1;
     let mut bind_values: Vec<String> = Vec::new();
 
-    if !filters.include_private.unwrap_or(false) {
+    if filters.include_private == Some(false) {
         conditions.push("is_public = true".to_string());
     }
     if let Some(ref sys_name) = filters.sys_name {
@@ -714,7 +714,7 @@ impl LogStore for PostgresStore {
         let group_col = &params.group_by; // Already validated by handler
 
         // Build WHERE clause with positional parameters
-        let mut conditions = vec!["is_public = true".to_string()];
+        let mut conditions = Vec::new();
         let mut bind_values: Vec<String> = Vec::new();
         let mut param_idx: usize = 0;
 

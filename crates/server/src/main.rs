@@ -7,6 +7,7 @@ use clap::{Args, Parser, Subcommand};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
 
 use flight_review_server::{api, db, storage::FileStorage, AppState};
@@ -53,6 +54,10 @@ struct ServeConfig {
     /// Can also be set via the MAPBOX_ACCESS_TOKEN environment variable.
     #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
     mapbox_token: Option<String>,
+
+    /// Path to the frontend static assets directory to serve
+    #[arg(long, default_value = "frontend/build")]
+    frontend_dir: String,
 }
 
 #[derive(Args)]
@@ -102,6 +107,7 @@ async fn run_server(config: ServeConfig) {
     if config.mapbox_token.is_some() {
         tracing::info!("mapbox geocoding: enabled");
     }
+    tracing::info!("frontend dir: {}", config.frontend_dir);
 
     let db = db::create_db(&config.db)
         .await
@@ -135,7 +141,11 @@ async fn run_server(config: ServeConfig) {
             get(api::logs::get_log_file),
         )
         .layer(CorsLayer::permissive())
-        .with_state(state);
+        .with_state(state)
+        .fallback_service(
+            ServeDir::new(&config.frontend_dir)
+                .fallback(ServeFile::new(format!("{}/index.html", config.frontend_dir)))
+        );
 
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr)

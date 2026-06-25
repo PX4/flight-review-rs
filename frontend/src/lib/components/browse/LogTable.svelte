@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import type { LogRecord } from '$lib/types';
-	import { formatDuration, formatFileSize, formatRelativeTime } from '$lib/utils/formatters';
+	import { formatDuration, formatFileSize, formatFlightDateTime, formatRelativeTime, parseFlightDateFromFilename } from '$lib/utils/formatters';
 	import { getHardwareName } from '$lib/utils/hardwareNames';
 	import FlightThumbnail from './FlightThumbnail.svelte';
 
@@ -21,6 +21,7 @@
 
 	const columns: Column[] = [
 		{ key: 'created_at', label: 'Date', sortable: true },
+		{ key: 'flight_datetime', label: 'Flight Date/Time', sortable: false },
 		{ key: 'vehicle_type', label: 'Type', sortable: true },
 		{ key: 'ver_hw', label: 'Hardware', sortable: true },
 		{ key: 'flight_duration_s', label: 'Duration', sortable: true },
@@ -86,6 +87,7 @@
 				<tbody class="divide-y divide-gray-100">
 					{#each logs as log (log.id)}
 						{@const loc = parseLocation(log.location_name)}
+						{@const flightDate = parseFlightDateFromFilename(log.filename)}
 						<tr
 							class="hover:bg-gray-50 cursor-pointer"
 							onclick={() => handleRowClick(log.id)}
@@ -121,6 +123,16 @@
 											</svg>
 											{formatRelativeTime(log.created_at)}
 										</span>
+									{:else if col.key === 'flight_datetime'}
+										{#if flightDate}
+											{@const formattedFlightDate = formatFlightDateTime(flightDate)}
+											<div>
+												<div class="text-xs text-gray-900">{formattedFlightDate.date}</div>
+												<div class="text-[10px] text-gray-400">{formattedFlightDate.time}</div>
+											</div>
+										{:else}
+											<span class="text-gray-300">{'\u2014'}</span>
+										{/if}
 									{:else if col.key === 'ver_hw'}
 										{getHardwareName(log.ver_hw)}
 									{:else if col.key === 'flight_duration_s'}

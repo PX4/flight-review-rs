@@ -301,7 +301,7 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
     let mut conditions = Vec::new();
     let mut bind_values: Vec<String> = Vec::new();
 
-    if !filters.include_private.unwrap_or(false) {
+    if filters.include_private == Some(false) {
         conditions.push("is_public = 1".to_string());
     }
     if let Some(ref sys_name) = filters.sys_name {
@@ -701,7 +701,7 @@ impl LogStore for SqliteStore {
         let group_col = &params.group_by; // Already validated by handler
 
         // Build WHERE clause
-        let mut conditions = vec!["is_public = 1".to_string()];
+        let mut conditions = Vec::new();
         let mut bind_values: Vec<String> = Vec::new();
 
         // Period filter
