@@ -316,11 +316,12 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
         conditions.push(
             "(filename LIKE ? OR sys_name LIKE ? OR ver_hw LIKE ? OR description LIKE ? \
              OR vehicle_name LIKE ? OR tags LIKE ? OR location_name LIKE ? \
-             OR ver_sw_release_str LIKE ? OR vehicle_type LIKE ?)"
+             OR ver_sw_release_str LIKE ? OR vehicle_type LIKE ? OR ver_sw LIKE ? \
+             OR sys_uuid LIKE ?)"
                 .to_string(),
         );
         let pattern = format!("%{}%", search);
-        for _ in 0..9 {
+        for _ in 0..11 {
             bind_values.push(pattern.clone());
         }
     }

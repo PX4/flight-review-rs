@@ -290,7 +290,7 @@ fn build_where_postgres(filters: &ListFilters) -> (String, Vec<String>, usize) {
             "(filename ILIKE ${p0} OR sys_name ILIKE ${p1} OR ver_hw ILIKE ${p2} \
              OR description ILIKE ${p3} OR vehicle_name ILIKE ${p4} OR tags ILIKE ${p5} \
              OR location_name ILIKE ${p6} OR ver_sw_release_str ILIKE ${p7} \
-             OR vehicle_type ILIKE ${p8})",
+             OR vehicle_type ILIKE ${p8} OR ver_sw ILIKE ${p9} OR sys_uuid ILIKE ${p10})",
             p0 = param_idx,
             p1 = param_idx + 1,
             p2 = param_idx + 2,
@@ -300,12 +300,14 @@ fn build_where_postgres(filters: &ListFilters) -> (String, Vec<String>, usize) {
             p6 = param_idx + 6,
             p7 = param_idx + 7,
             p8 = param_idx + 8,
+            p9 = param_idx + 9,
+            p10 = param_idx + 10,
         ));
         let pattern = format!("%{}%", search);
-        for _ in 0..9 {
+        for _ in 0..11 {
             bind_values.push(pattern.clone());
         }
-        param_idx += 9;
+        param_idx += 11;
     }
     if let Some(ref date_from) = filters.date_from {
         conditions.push(format!("created_at >= ${}", param_idx));
