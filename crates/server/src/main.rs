@@ -1,6 +1,9 @@
+use axum::{http::StatusCode, routing::any};
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::TcpListener;
+use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
 
 use flight_review_server::{db, storage::FileStorage, AppState};
@@ -47,6 +50,11 @@ struct ServeConfig {
     /// Can also be set via the MAPBOX_ACCESS_TOKEN environment variable.
     #[arg(long, env = "MAPBOX_ACCESS_TOKEN")]
     mapbox_token: Option<String>,
+
+    /// Directory containing built frontend assets to serve.
+    /// When omitted, the server exposes API routes only.
+    #[arg(long)]
+    frontend_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]
@@ -100,6 +108,9 @@ async fn run_server(config: ServeConfig) {
     if config.mapbox_token.is_some() {
         tracing::info!("mapbox geocoding: enabled");
     }
+    if let Some(ref frontend_dir) = config.frontend_dir {
+        tracing::info!("frontend: {}", frontend_dir.display());
+    }
 
     let db = db::create_db(&config.db)
         .await
@@ -116,7 +127,14 @@ async fn run_server(config: ServeConfig) {
         http_client: reqwest::Client::new(),
     });
 
-    let app = flight_review_server::build_router(state);
+    let mut app = flight_review_server::build_router(state);
+    if let Some(frontend_dir) = config.frontend_dir {
+        let index = frontend_dir.join("index.html");
+        app = app
+            .route("/api", any(api_not_found))
+            .route("/api/{*path}", any(api_not_found))
+            .fallback_service(ServeDir::new(frontend_dir).fallback(ServeFile::new(index)));
+    }
 
     let addr = format!("{}:{}", config.host, config.port);
     let listener = TcpListener::bind(&addr)
@@ -127,6 +145,10 @@ async fn run_server(config: ServeConfig) {
     axum::serve(listener, app)
         .await
         .expect("server error");
+}
+
+async fn api_not_found() -> StatusCode {
+    StatusCode::NOT_FOUND
 }
 
 /// Map v1 MavType string to a normalized vehicle type category.
