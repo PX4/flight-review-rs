@@ -22,7 +22,11 @@ enum BatchFormat {
 }
 
 #[derive(Parser)]
-#[command(name = "ulog-convert", version, about = "Convert and analyze PX4 ULog files")]
+#[command(
+    name = "ulog-convert",
+    version,
+    about = "Convert and analyze PX4 ULog files"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -465,10 +469,7 @@ fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFor
             }
 
             // Filter out empty results if diagnostics-only
-            if opts.diagnostics_only
-                && result.diagnostics.is_empty()
-                && result.error.is_none()
-            {
+            if opts.diagnostics_only && result.diagnostics.is_empty() && result.error.is_none() {
                 return None;
             }
 
@@ -706,13 +707,14 @@ fn print_table(results: &[BatchResult], opts: &BatchOpts) {
                         }
                     })
                     .collect();
-                let worst = if r.diagnostics.iter().any(|d| {
-                    matches!(d.severity, flight_review::diagnostics::Severity::Critical)
-                }) {
-                    "!"
-                } else {
-                    " "
-                };
+                let worst =
+                    if r.diagnostics.iter().any(|d| {
+                        matches!(d.severity, flight_review::diagnostics::Severity::Critical)
+                    }) {
+                        "!"
+                    } else {
+                        " "
+                    };
                 line.push_str(&format!(" {worst} {}", diag_str.join(", ")));
             }
         }

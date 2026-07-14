@@ -10,8 +10,8 @@ use px4_ulog::stream_parser::file_reader::{
 };
 use px4_ulog::stream_parser::model::FlattenedFieldType;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlightAnalysis {
@@ -152,41 +152,53 @@ impl RunningStats {
         }
         let val = match self.field_type {
             FlattenedFieldType::Float => {
-                if off + 4 > data.len() { return; }
+                if off + 4 > data.len() {
+                    return;
+                }
                 f32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
             }
             FlattenedFieldType::Double => {
-                if off + 8 > data.len() { return; }
+                if off + 8 > data.len() {
+                    return;
+                }
                 f64::from_le_bytes(data[off..off + 8].try_into().unwrap())
             }
             FlattenedFieldType::Int32 => {
-                if off + 4 > data.len() { return; }
+                if off + 4 > data.len() {
+                    return;
+                }
                 i32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
             }
             FlattenedFieldType::UInt32 => {
-                if off + 4 > data.len() { return; }
+                if off + 4 > data.len() {
+                    return;
+                }
                 u32::from_le_bytes(data[off..off + 4].try_into().unwrap()) as f64
             }
             FlattenedFieldType::Int16 => {
-                if off + 2 > data.len() { return; }
+                if off + 2 > data.len() {
+                    return;
+                }
                 i16::from_le_bytes(data[off..off + 2].try_into().unwrap()) as f64
             }
             FlattenedFieldType::UInt16 => {
-                if off + 2 > data.len() { return; }
+                if off + 2 > data.len() {
+                    return;
+                }
                 u16::from_le_bytes(data[off..off + 2].try_into().unwrap()) as f64
             }
-            FlattenedFieldType::Int8 => {
-                data[off] as i8 as f64
-            }
-            FlattenedFieldType::UInt8 => {
-                data[off] as f64
-            }
+            FlattenedFieldType::Int8 => data[off] as i8 as f64,
+            FlattenedFieldType::UInt8 => data[off] as f64,
             FlattenedFieldType::Int64 => {
-                if off + 8 > data.len() { return; }
+                if off + 8 > data.len() {
+                    return;
+                }
                 i64::from_le_bytes(data[off..off + 8].try_into().unwrap()) as f64
             }
             FlattenedFieldType::UInt64 => {
-                if off + 8 > data.len() { return; }
+                if off + 8 > data.len() {
+                    return;
+                }
                 u64::from_le_bytes(data[off..off + 8].try_into().unwrap()) as f64
             }
             FlattenedFieldType::Bool | FlattenedFieldType::Char => return,
@@ -346,402 +358,402 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
 
     read_file_with_simple_callback(path, &mut |msg| {
         if let Message::Data(data) = msg {
-                let topic = data.flattened_format.message_name.as_str();
-                let ts = data
-                    .flattened_format
-                    .timestamp_field
-                    .as_ref()
-                    .map(|tf| tf.parse_timestamp(data.data));
+            let topic = data.flattened_format.message_name.as_str();
+            let ts = data
+                .flattened_format
+                .timestamp_field
+                .as_ref()
+                .map(|tf| tf.parse_timestamp(data.data));
 
-                // --- Per-field stats tracking (all topics) ---
-                if !topics_initialized.contains_key(topic) {
-                    topics_initialized.insert(topic.to_string(), true);
-                    let mut stats_vec = Vec::new();
-                    let mut numeric_count = 0;
-                    for field in data.flattened_format.field_iter() {
-                        // Skip timestamp field
-                        if field.flattened_field_name == "timestamp" {
-                            continue;
-                        }
-                        if !is_numeric_field_type(&field.field_type) {
-                            continue;
-                        }
-                        if numeric_count >= MAX_FIELDS_PER_TOPIC {
-                            break;
-                        }
-                        stats_vec.push(RunningStats::new(
-                            topic.to_string(),
-                            field.flattened_field_name.clone(),
-                            field.offset,
-                            field.field_type.clone(),
-                        ));
-                        numeric_count += 1;
+            // --- Per-field stats tracking (all topics) ---
+            if !topics_initialized.contains_key(topic) {
+                topics_initialized.insert(topic.to_string(), true);
+                let mut stats_vec = Vec::new();
+                let mut numeric_count = 0;
+                for field in data.flattened_format.field_iter() {
+                    // Skip timestamp field
+                    if field.flattened_field_name == "timestamp" {
+                        continue;
                     }
-                    field_stats_map.insert(topic.to_string(), stats_vec);
+                    if !is_numeric_field_type(&field.field_type) {
+                        continue;
+                    }
+                    if numeric_count >= MAX_FIELDS_PER_TOPIC {
+                        break;
+                    }
+                    stats_vec.push(RunningStats::new(
+                        topic.to_string(),
+                        field.flattened_field_name.clone(),
+                        field.offset,
+                        field.field_type.clone(),
+                    ));
+                    numeric_count += 1;
+                }
+                field_stats_map.insert(topic.to_string(), stats_vec);
+            }
+
+            if let Some(stats_vec) = field_stats_map.get_mut(topic) {
+                for rs in stats_vec.iter_mut() {
+                    rs.update(data.data);
+                }
+            }
+
+            match topic {
+                "vehicle_status" => {
+                    if let Some(ts) = ts {
+                        // nav_state
+                        if let Ok(parser) =
+                            data.flattened_format.get_field_parser::<u8>("nav_state")
+                        {
+                            let nav_state = parser.parse(data.data);
+                            if current_nav_state != Some(nav_state) {
+                                // Close previous segment
+                                if let Some(prev) = current_nav_state {
+                                    analysis.flight_modes.push(FlightModeSegment {
+                                        mode: nav_state_name(prev).to_string(),
+                                        mode_id: prev,
+                                        start_us: mode_start_us,
+                                        end_us: ts,
+                                        duration_s: (ts - mode_start_us) as f64 / 1_000_000.0,
+                                    });
+                                }
+                                current_nav_state = Some(nav_state);
+                                mode_start_us = ts;
+                                mode_changes.push((ts, nav_state));
+                            }
+                        }
+
+                        // VTOL state
+                        let vt = data
+                            .flattened_format
+                            .get_field_parser::<u8>("vehicle_type")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+                        // in_transition_mode can be bool or uint8
+                        let in_trans = data
+                            .flattened_format
+                            .get_field_parser::<u8>("in_transition_mode")
+                            .ok()
+                            .map(|p| p.parse(data.data) != 0);
+
+                        if let (Some(vt_val), Some(it_val)) = (vt, in_trans) {
+                            let changed = current_vehicle_type != Some(vt_val)
+                                || current_in_transition != Some(it_val);
+                            if changed {
+                                // Close previous VTOL segment
+                                if let Some(prev_vt) = current_vehicle_type {
+                                    let prev_it = current_in_transition.unwrap_or(false);
+                                    analysis.vtol_states.push(VtolStateSegment {
+                                        state: vtol_state_name(prev_vt, prev_it).to_string(),
+                                        start_us: vtol_start_us,
+                                        end_us: ts,
+                                    });
+                                }
+                                current_vehicle_type = Some(vt_val);
+                                current_in_transition = Some(it_val);
+                                vtol_start_us = ts;
+                            }
+                        }
+                    }
                 }
 
-                if let Some(stats_vec) = field_stats_map.get_mut(topic) {
-                    for rs in stats_vec.iter_mut() {
-                        rs.update(data.data);
+                "vehicle_local_position" => {
+                    if let (Ok(x_p), Ok(y_p), Ok(z_p), Ok(vx_p), Ok(vy_p), Ok(vz_p)) = (
+                        data.flattened_format.get_field_parser::<f32>("x"),
+                        data.flattened_format.get_field_parser::<f32>("y"),
+                        data.flattened_format.get_field_parser::<f32>("z"),
+                        data.flattened_format.get_field_parser::<f32>("vx"),
+                        data.flattened_format.get_field_parser::<f32>("vy"),
+                        data.flattened_format.get_field_parser::<f32>("vz"),
+                    ) {
+                        let x = x_p.parse(data.data);
+                        let y = y_p.parse(data.data);
+                        let z = z_p.parse(data.data);
+                        let vx = vx_p.parse(data.data);
+                        let vy = vy_p.parse(data.data);
+                        let vz = vz_p.parse(data.data);
+
+                        // Skip NaN values
+                        if x.is_finite() && y.is_finite() && z.is_finite() {
+                            // Distance accumulation
+                            if let Some((px, py, pz)) = prev_pos {
+                                let dx = (x - px) as f64;
+                                let dy = (y - py) as f64;
+                                let dz = (z - pz) as f64;
+                                total_distance += (dx * dx + dy * dy + dz * dz).sqrt();
+                            }
+                            prev_pos = Some((x, y, z));
+
+                            // Altitude tracking (NED: z negative = up)
+                            if z < min_z {
+                                min_z = z;
+                            }
+                            if z > max_z {
+                                max_z = z;
+                            }
+                        }
+
+                        if vx.is_finite() && vy.is_finite() && vz.is_finite() {
+                            let speed_3d = ((vx * vx + vy * vy + vz * vz) as f64).sqrt() as f32;
+                            let speed_h = ((vx * vx + vy * vy) as f64).sqrt() as f32;
+
+                            if speed_3d > max_speed_3d {
+                                max_speed_3d = speed_3d;
+                            }
+                            if speed_h > max_speed_h {
+                                max_speed_h = speed_h;
+                            }
+                            // NED: negative vz = up
+                            if -vz > max_speed_up {
+                                max_speed_up = -vz;
+                            }
+                            if vz > max_speed_down {
+                                max_speed_down = vz;
+                            }
+
+                            speed_sum += speed_3d as f64;
+                            speed_count += 1;
+                        }
                     }
                 }
 
-                match topic {
-                    "vehicle_status" => {
-                        if let Some(ts) = ts {
-                            // nav_state
-                            if let Ok(parser) =
-                                data.flattened_format.get_field_parser::<u8>("nav_state")
-                            {
-                                let nav_state = parser.parse(data.data);
-                                if current_nav_state != Some(nav_state) {
-                                    // Close previous segment
-                                    if let Some(prev) = current_nav_state {
-                                        analysis.flight_modes.push(FlightModeSegment {
-                                            mode: nav_state_name(prev).to_string(),
-                                            mode_id: prev,
-                                            start_us: mode_start_us,
-                                            end_us: ts,
-                                            duration_s: (ts - mode_start_us) as f64 / 1_000_000.0,
-                                        });
-                                    }
-                                    current_nav_state = Some(nav_state);
-                                    mode_start_us = ts;
-                                    mode_changes.push((ts, nav_state));
-                                }
-                            }
+                "vehicle_attitude" => {
+                    // Quaternion fields are flattened as q[0], q[1], q[2], q[3]
+                    if let (Ok(q0_p), Ok(q1_p), Ok(q2_p), Ok(q3_p)) = (
+                        data.flattened_format.get_field_parser::<f32>("q[0]"),
+                        data.flattened_format.get_field_parser::<f32>("q[1]"),
+                        data.flattened_format.get_field_parser::<f32>("q[2]"),
+                        data.flattened_format.get_field_parser::<f32>("q[3]"),
+                    ) {
+                        let q0 = q0_p.parse(data.data);
+                        let q1 = q1_p.parse(data.data);
+                        let q2 = q2_p.parse(data.data);
+                        let q3 = q3_p.parse(data.data);
 
-                            // VTOL state
-                            let vt = data
-                                .flattened_format
-                                .get_field_parser::<u8>("vehicle_type")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-                            // in_transition_mode can be bool or uint8
-                            let in_trans = data
-                                .flattened_format
-                                .get_field_parser::<u8>("in_transition_mode")
-                                .ok()
-                                .map(|p| p.parse(data.data) != 0);
+                        if q0.is_finite() && q1.is_finite() && q2.is_finite() && q3.is_finite() {
+                            // Euler angles from quaternion
+                            let roll =
+                                (2.0 * (q0 * q1 + q2 * q3)).atan2(1.0 - 2.0 * (q1 * q1 + q2 * q2));
+                            let sin_pitch = 2.0 * (q0 * q2 - q3 * q1);
+                            let pitch = if sin_pitch.abs() >= 1.0 {
+                                std::f32::consts::FRAC_PI_2.copysign(sin_pitch)
+                            } else {
+                                sin_pitch.asin()
+                            };
 
-                            if let (Some(vt_val), Some(it_val)) = (vt, in_trans) {
-                                let changed = current_vehicle_type != Some(vt_val)
-                                    || current_in_transition != Some(it_val);
-                                if changed {
-                                    // Close previous VTOL segment
-                                    if let Some(prev_vt) = current_vehicle_type {
-                                        let prev_it = current_in_transition.unwrap_or(false);
-                                        analysis.vtol_states.push(VtolStateSegment {
-                                            state: vtol_state_name(prev_vt, prev_it).to_string(),
-                                            start_us: vtol_start_us,
-                                            end_us: ts,
-                                        });
-                                    }
-                                    current_vehicle_type = Some(vt_val);
-                                    current_in_transition = Some(it_val);
-                                    vtol_start_us = ts;
-                                }
+                            let tilt = (pitch.cos() * roll.cos()).acos();
+                            if tilt.is_finite() && tilt > max_tilt_rad {
+                                max_tilt_rad = tilt;
                             }
                         }
                     }
+                }
 
-                    "vehicle_local_position" => {
-                        if let (Ok(x_p), Ok(y_p), Ok(z_p), Ok(vx_p), Ok(vy_p), Ok(vz_p)) = (
-                            data.flattened_format.get_field_parser::<f32>("x"),
-                            data.flattened_format.get_field_parser::<f32>("y"),
-                            data.flattened_format.get_field_parser::<f32>("z"),
-                            data.flattened_format.get_field_parser::<f32>("vx"),
-                            data.flattened_format.get_field_parser::<f32>("vy"),
-                            data.flattened_format.get_field_parser::<f32>("vz"),
-                        ) {
-                            let x = x_p.parse(data.data);
-                            let y = y_p.parse(data.data);
-                            let z = z_p.parse(data.data);
-                            let vx = vx_p.parse(data.data);
-                            let vy = vy_p.parse(data.data);
-                            let vz = vz_p.parse(data.data);
-
-                            // Skip NaN values
-                            if x.is_finite() && y.is_finite() && z.is_finite() {
-                                // Distance accumulation
-                                if let Some((px, py, pz)) = prev_pos {
-                                    let dx = (x - px) as f64;
-                                    let dy = (y - py) as f64;
-                                    let dz = (z - pz) as f64;
-                                    total_distance += (dx * dx + dy * dy + dz * dz).sqrt();
-                                }
-                                prev_pos = Some((x, y, z));
-
-                                // Altitude tracking (NED: z negative = up)
-                                if z < min_z {
-                                    min_z = z;
-                                }
-                                if z > max_z {
-                                    max_z = z;
-                                }
-                            }
-
-                            if vx.is_finite() && vy.is_finite() && vz.is_finite() {
-                                let speed_3d =
-                                    ((vx * vx + vy * vy + vz * vz) as f64).sqrt() as f32;
-                                let speed_h = ((vx * vx + vy * vy) as f64).sqrt() as f32;
-
-                                if speed_3d > max_speed_3d {
-                                    max_speed_3d = speed_3d;
-                                }
-                                if speed_h > max_speed_h {
-                                    max_speed_h = speed_h;
-                                }
-                                // NED: negative vz = up
-                                if -vz > max_speed_up {
-                                    max_speed_up = -vz;
-                                }
-                                if vz > max_speed_down {
-                                    max_speed_down = vz;
-                                }
-
-                                speed_sum += speed_3d as f64;
-                                speed_count += 1;
+                "vehicle_angular_velocity" => {
+                    // Angular velocity fields: xyz[0], xyz[1], xyz[2]
+                    if let (Ok(x_p), Ok(y_p), Ok(z_p)) = (
+                        data.flattened_format.get_field_parser::<f32>("xyz[0]"),
+                        data.flattened_format.get_field_parser::<f32>("xyz[1]"),
+                        data.flattened_format.get_field_parser::<f32>("xyz[2]"),
+                    ) {
+                        let wx = x_p.parse(data.data);
+                        let wy = y_p.parse(data.data);
+                        let wz = z_p.parse(data.data);
+                        if wx.is_finite() && wy.is_finite() && wz.is_finite() {
+                            let rot_speed = ((wx * wx + wy * wy + wz * wz) as f64).sqrt() as f32;
+                            if rot_speed > max_rotation_speed_rad_s {
+                                max_rotation_speed_rad_s = rot_speed;
                             }
                         }
                     }
+                }
 
-                    "vehicle_attitude" => {
-                        // Quaternion fields are flattened as q[0], q[1], q[2], q[3]
-                        if let (Ok(q0_p), Ok(q1_p), Ok(q2_p), Ok(q3_p)) = (
-                            data.flattened_format.get_field_parser::<f32>("q[0]"),
-                            data.flattened_format.get_field_parser::<f32>("q[1]"),
-                            data.flattened_format.get_field_parser::<f32>("q[2]"),
-                            data.flattened_format.get_field_parser::<f32>("q[3]"),
-                        ) {
-                            let q0 = q0_p.parse(data.data);
-                            let q1 = q1_p.parse(data.data);
-                            let q2 = q2_p.parse(data.data);
-                            let q3 = q3_p.parse(data.data);
+                "battery_status" => {
+                    let current = data
+                        .flattened_format
+                        .get_field_parser::<f32>("current_a")
+                        .ok()
+                        .map(|p| p.parse(data.data));
+                    let voltage = data
+                        .flattened_format
+                        .get_field_parser::<f32>("voltage_v")
+                        .ok()
+                        .map(|p| p.parse(data.data));
+                    let discharged = data
+                        .flattened_format
+                        .get_field_parser::<f32>("discharged_mah")
+                        .ok()
+                        .map(|p| p.parse(data.data));
 
-                            if q0.is_finite() && q1.is_finite() && q2.is_finite() && q3.is_finite()
-                            {
-                                // Euler angles from quaternion
-                                let roll = (2.0 * (q0 * q1 + q2 * q3))
-                                    .atan2(1.0 - 2.0 * (q1 * q1 + q2 * q2));
-                                let sin_pitch = 2.0 * (q0 * q2 - q3 * q1);
-                                let pitch = if sin_pitch.abs() >= 1.0 {
-                                    std::f32::consts::FRAC_PI_2.copysign(sin_pitch)
+                    if let Some(c) = current {
+                        if c.is_finite() && c >= 0.0 {
+                            has_battery_data = true;
+                            current_sum += c as f64;
+                            current_count += 1;
+                            if c > max_current {
+                                max_current = c;
+                            }
+                        }
+                    }
+                    if let Some(v) = voltage {
+                        if v.is_finite() && v > 0.0 {
+                            has_battery_data = true;
+                            if v < min_voltage {
+                                min_voltage = v;
+                            }
+                        }
+                    }
+                    if let Some(d) = discharged {
+                        if d.is_finite() && d >= 0.0 {
+                            has_battery_data = true;
+                            last_discharged = Some(d);
+                        }
+                    }
+                }
+
+                "vehicle_gps_position" => {
+                    if let Some(ts) = ts {
+                        // GPS quality
+                        let sats = data
+                            .flattened_format
+                            .get_field_parser::<u8>("satellites_used")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+                        let fix_type = data
+                            .flattened_format
+                            .get_field_parser::<u8>("fix_type")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+                        let hdop = data
+                            .flattened_format
+                            .get_field_parser::<f32>("hdop")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+                        let eph = data
+                            .flattened_format
+                            .get_field_parser::<f32>("eph")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+                        let epv = data
+                            .flattened_format
+                            .get_field_parser::<f32>("epv")
+                            .ok()
+                            .map(|p| p.parse(data.data));
+
+                        if let Some(s) = sats {
+                            has_gps_quality = true;
+                            let s16 = s as u16;
+                            if s16 < min_sats {
+                                min_sats = s16;
+                            }
+                            if s16 > max_sats {
+                                max_sats = s16;
+                            }
+                        }
+                        if let Some(ft) = fix_type {
+                            has_gps_quality = true;
+                            if !fix_types_seen.contains(&ft) {
+                                fix_types_seen.push(ft);
+                            }
+                        }
+                        if let Some(h) = hdop {
+                            if h.is_finite() && h > max_hdop {
+                                max_hdop = h;
+                            }
+                        }
+                        if let Some(e) = eph {
+                            if e.is_finite() && e > max_eph {
+                                max_eph = e;
+                            }
+                        }
+                        if let Some(e) = epv {
+                            if e.is_finite() && e > max_epv {
+                                max_epv = e;
+                            }
+                        }
+
+                        // GPS track — downsample to ~1 Hz, only 3D fix or better
+                        let ft = fix_type.unwrap_or(0);
+                        if ft > 2 && (ts - last_track_ts) >= 1_000_000 {
+                            // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
+                            let coords: Option<(f64, f64, f64)> =
+                                if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                                    data.flattened_format
+                                        .get_field_parser::<f64>("latitude_deg"),
+                                    data.flattened_format
+                                        .get_field_parser::<f64>("longitude_deg"),
+                                    data.flattened_format
+                                        .get_field_parser::<f64>("altitude_msl_m"),
+                                ) {
+                                    let lat = lat_p.parse(data.data);
+                                    let lon = lon_p.parse(data.data);
+                                    let alt = alt_p.parse(data.data);
+                                    Some((lat, lon, alt))
+                                } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                                    data.flattened_format.get_field_parser::<i32>("lat"),
+                                    data.flattened_format.get_field_parser::<i32>("lon"),
+                                    data.flattened_format.get_field_parser::<i32>("alt"),
+                                ) {
+                                    let lat = lat_p.parse(data.data);
+                                    let lon = lon_p.parse(data.data);
+                                    let alt = alt_p.parse(data.data);
+                                    Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
                                 } else {
-                                    sin_pitch.asin()
+                                    None
                                 };
 
-                                let tilt = (pitch.cos() * roll.cos()).acos();
-                                if tilt.is_finite() && tilt > max_tilt_rad {
-                                    max_tilt_rad = tilt;
+                            if let Some((lat_deg, lon_deg, alt_m)) = coords {
+                                if lat_deg != 0.0 || lon_deg != 0.0 {
+                                    // Find current mode from mode_changes
+                                    let mode_id = mode_changes
+                                        .iter()
+                                        .rev()
+                                        .find(|(t, _)| *t <= ts)
+                                        .map(|(_, m)| *m)
+                                        .unwrap_or(0);
+
+                                    analysis.gps_track.push(TrackPoint {
+                                        lat_deg,
+                                        lon_deg,
+                                        alt_m,
+                                        timestamp_us: ts,
+                                        mode_id,
+                                    });
+                                    last_track_ts = ts;
                                 }
                             }
                         }
                     }
-
-                    "vehicle_angular_velocity" => {
-                        // Angular velocity fields: xyz[0], xyz[1], xyz[2]
-                        if let (Ok(x_p), Ok(y_p), Ok(z_p)) = (
-                            data.flattened_format.get_field_parser::<f32>("xyz[0]"),
-                            data.flattened_format.get_field_parser::<f32>("xyz[1]"),
-                            data.flattened_format.get_field_parser::<f32>("xyz[2]"),
-                        ) {
-                            let wx = x_p.parse(data.data);
-                            let wy = y_p.parse(data.data);
-                            let wz = z_p.parse(data.data);
-                            if wx.is_finite() && wy.is_finite() && wz.is_finite() {
-                                let rot_speed =
-                                    ((wx * wx + wy * wy + wz * wz) as f64).sqrt() as f32;
-                                if rot_speed > max_rotation_speed_rad_s {
-                                    max_rotation_speed_rad_s = rot_speed;
-                                }
-                            }
-                        }
-                    }
-
-                    "battery_status" => {
-                        let current = data
-                            .flattened_format
-                            .get_field_parser::<f32>("current_a")
-                            .ok()
-                            .map(|p| p.parse(data.data));
-                        let voltage = data
-                            .flattened_format
-                            .get_field_parser::<f32>("voltage_v")
-                            .ok()
-                            .map(|p| p.parse(data.data));
-                        let discharged = data
-                            .flattened_format
-                            .get_field_parser::<f32>("discharged_mah")
-                            .ok()
-                            .map(|p| p.parse(data.data));
-
-                        if let Some(c) = current {
-                            if c.is_finite() && c >= 0.0 {
-                                has_battery_data = true;
-                                current_sum += c as f64;
-                                current_count += 1;
-                                if c > max_current {
-                                    max_current = c;
-                                }
-                            }
-                        }
-                        if let Some(v) = voltage {
-                            if v.is_finite() && v > 0.0 {
-                                has_battery_data = true;
-                                if v < min_voltage {
-                                    min_voltage = v;
-                                }
-                            }
-                        }
-                        if let Some(d) = discharged {
-                            if d.is_finite() && d >= 0.0 {
-                                has_battery_data = true;
-                                last_discharged = Some(d);
-                            }
-                        }
-                    }
-
-                    "vehicle_gps_position" => {
-                        if let Some(ts) = ts {
-                            // GPS quality
-                            let sats = data
-                                .flattened_format
-                                .get_field_parser::<u8>("satellites_used")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-                            let fix_type = data
-                                .flattened_format
-                                .get_field_parser::<u8>("fix_type")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-                            let hdop = data
-                                .flattened_format
-                                .get_field_parser::<f32>("hdop")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-                            let eph = data
-                                .flattened_format
-                                .get_field_parser::<f32>("eph")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-                            let epv = data
-                                .flattened_format
-                                .get_field_parser::<f32>("epv")
-                                .ok()
-                                .map(|p| p.parse(data.data));
-
-                            if let Some(s) = sats {
-                                has_gps_quality = true;
-                                let s16 = s as u16;
-                                if s16 < min_sats {
-                                    min_sats = s16;
-                                }
-                                if s16 > max_sats {
-                                    max_sats = s16;
-                                }
-                            }
-                            if let Some(ft) = fix_type {
-                                has_gps_quality = true;
-                                if !fix_types_seen.contains(&ft) {
-                                    fix_types_seen.push(ft);
-                                }
-                            }
-                            if let Some(h) = hdop {
-                                if h.is_finite() && h > max_hdop {
-                                    max_hdop = h;
-                                }
-                            }
-                            if let Some(e) = eph {
-                                if e.is_finite() && e > max_eph {
-                                    max_eph = e;
-                                }
-                            }
-                            if let Some(e) = epv {
-                                if e.is_finite() && e > max_epv {
-                                    max_epv = e;
-                                }
-                            }
-
-                            // GPS track — downsample to ~1 Hz, only 3D fix or better
-                            let ft = fix_type.unwrap_or(0);
-                            if ft > 2 && (ts - last_track_ts) >= 1_000_000 {
-                                // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
-                                let coords: Option<(f64, f64, f64)> =
-                                    if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
-                                        data.flattened_format.get_field_parser::<f64>("latitude_deg"),
-                                        data.flattened_format.get_field_parser::<f64>("longitude_deg"),
-                                        data.flattened_format.get_field_parser::<f64>("altitude_msl_m"),
-                                    ) {
-                                        let lat = lat_p.parse(data.data);
-                                        let lon = lon_p.parse(data.data);
-                                        let alt = alt_p.parse(data.data);
-                                        Some((lat, lon, alt))
-                                    } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
-                                        data.flattened_format.get_field_parser::<i32>("lat"),
-                                        data.flattened_format.get_field_parser::<i32>("lon"),
-                                        data.flattened_format.get_field_parser::<i32>("alt"),
-                                    ) {
-                                        let lat = lat_p.parse(data.data);
-                                        let lon = lon_p.parse(data.data);
-                                        let alt = alt_p.parse(data.data);
-                                        Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
-                                    } else {
-                                        None
-                                    };
-
-                                if let Some((lat_deg, lon_deg, alt_m)) = coords {
-                                    if lat_deg != 0.0 || lon_deg != 0.0 {
-                                        // Find current mode from mode_changes
-                                        let mode_id = mode_changes
-                                            .iter()
-                                            .rev()
-                                            .find(|(t, _)| *t <= ts)
-                                            .map(|(_, m)| *m)
-                                            .unwrap_or(0);
-
-                                        analysis.gps_track.push(TrackPoint {
-                                            lat_deg,
-                                            lon_deg,
-                                            alt_m,
-                                            timestamp_us: ts,
-                                            mode_id,
-                                        });
-                                        last_track_ts = ts;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    "vehicle_imu_status" => {
-                        if let Ok(vibe_p) = data
-                            .flattened_format
-                            .get_field_parser::<f32>("accel_vibration_metric")
-                        {
-                            let v = vibe_p.parse(data.data);
-                            if v.is_finite() && v >= 0.0 {
-                                vibe_sum += v as f64;
-                                vibe_count += 1;
-                                if v > vibe_max {
-                                    vibe_max = v;
-                                }
-                            }
-                        }
-                    }
-
-                    _ => {}
                 }
 
-                // Dispatch to diagnostic analyzers
-                if diagnostic_topics.contains(topic) {
-                    for analyzer in analyzers.iter_mut() {
-                        if analyzer.required_topics().contains(&topic) {
-                            analyzer.on_message(data);
+                "vehicle_imu_status" => {
+                    if let Ok(vibe_p) = data
+                        .flattened_format
+                        .get_field_parser::<f32>("accel_vibration_metric")
+                    {
+                        let v = vibe_p.parse(data.data);
+                        if v.is_finite() && v >= 0.0 {
+                            vibe_sum += v as f64;
+                            vibe_count += 1;
+                            if v > vibe_max {
+                                vibe_max = v;
+                            }
                         }
+                    }
+                }
+
+                _ => {}
+            }
+
+            // Dispatch to diagnostic analyzers
+            if diagnostic_topics.contains(topic) {
+                for analyzer in analyzers.iter_mut() {
+                    if analyzer.required_topics().contains(&topic) {
+                        analyzer.on_message(data);
                     }
                 }
             }
+        }
         SimpleCallbackResult::KeepReading
     })?;
 
@@ -878,10 +890,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
         .sort_by(|a, b| a.topic.cmp(&b.topic).then_with(|| a.field.cmp(&b.field)));
 
     // --- Finalize diagnostics ---
-    analysis.diagnostics = analyzers
-        .into_iter()
-        .flat_map(|a| a.finish())
-        .collect();
+    analysis.diagnostics = analyzers.into_iter().flat_map(|a| a.finish()).collect();
 
     Ok(analysis)
 }
@@ -898,19 +907,11 @@ fn compute_non_default_params(metadata: &FlightMetadata, analysis: &mut FlightAn
 
         if let Some(default) = metadata.default_parameters.get(name) {
             let (val_f64, def_f64) = match (value, default) {
-                (ParamValue::Float(v), ParamValue::Float(d)) => {
-                    (*v as f64, *d as f64)
-                }
-                (ParamValue::Int32(v), ParamValue::Int32(d)) => {
-                    (*v as f64, *d as f64)
-                }
+                (ParamValue::Float(v), ParamValue::Float(d)) => (*v as f64, *d as f64),
+                (ParamValue::Int32(v), ParamValue::Int32(d)) => (*v as f64, *d as f64),
                 // Mixed types — compare as f64
-                (ParamValue::Float(v), ParamValue::Int32(d)) => {
-                    (*v as f64, *d as f64)
-                }
-                (ParamValue::Int32(v), ParamValue::Float(d)) => {
-                    (*v as f64, *d as f64)
-                }
+                (ParamValue::Float(v), ParamValue::Int32(d)) => (*v as f64, *d as f64),
+                (ParamValue::Int32(v), ParamValue::Float(d)) => (*v as f64, *d as f64),
             };
 
             if (val_f64 - def_f64).abs() > f64::EPSILON {
@@ -937,8 +938,10 @@ mod tests {
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         std::path::Path::new(manifest)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // workspace root
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // workspace root
             .join("crates/converter/tests/fixtures")
             .join(name)
             .to_string_lossy()
@@ -998,9 +1001,21 @@ mod tests {
         if !analysis.gps_track.is_empty() {
             // Verify track points have valid coordinates
             for pt in &analysis.gps_track {
-                assert!(pt.lat_deg.abs() <= 90.0, "latitude out of range: {}", pt.lat_deg);
-                assert!(pt.lon_deg.abs() <= 180.0, "longitude out of range: {}", pt.lon_deg);
-                assert!(pt.alt_m.abs() < 100_000.0, "altitude out of range: {}", pt.alt_m);
+                assert!(
+                    pt.lat_deg.abs() <= 90.0,
+                    "latitude out of range: {}",
+                    pt.lat_deg
+                );
+                assert!(
+                    pt.lon_deg.abs() <= 180.0,
+                    "longitude out of range: {}",
+                    pt.lon_deg
+                );
+                assert!(
+                    pt.alt_m.abs() < 100_000.0,
+                    "altitude out of range: {}",
+                    pt.alt_m
+                );
                 assert!(pt.timestamp_us > 0, "timestamp should be positive");
             }
 
@@ -1027,16 +1042,33 @@ mod tests {
         );
 
         // Check we have stats from multiple topics
-        let topics: std::collections::HashSet<&str> =
-            analysis.field_stats.iter().map(|fs| fs.field.as_str()).collect();
+        let topics: std::collections::HashSet<&str> = analysis
+            .field_stats
+            .iter()
+            .map(|fs| fs.field.as_str())
+            .collect();
         assert!(topics.len() > 1, "should have stats for multiple fields");
 
         // All stats should have valid values
         for fs in &analysis.field_stats {
-            assert!(fs.count > 0, "count should be > 0 for {}.{}", fs.topic, fs.field);
-            assert!(fs.min <= fs.max, "min should be <= max for {}.{}", fs.topic, fs.field);
-            assert!(fs.mean >= fs.min && fs.mean <= fs.max,
-                "mean should be between min and max for {}.{}", fs.topic, fs.field);
+            assert!(
+                fs.count > 0,
+                "count should be > 0 for {}.{}",
+                fs.topic,
+                fs.field
+            );
+            assert!(
+                fs.min <= fs.max,
+                "min should be <= max for {}.{}",
+                fs.topic,
+                fs.field
+            );
+            assert!(
+                fs.mean >= fs.min && fs.mean <= fs.max,
+                "mean should be between min and max for {}.{}",
+                fs.topic,
+                fs.field
+            );
         }
     }
 
@@ -1057,8 +1089,11 @@ mod tests {
         );
 
         // Check that known topics are represented
-        let topic_names: std::collections::HashSet<&str> =
-            analysis.field_stats.iter().map(|fs| fs.topic.as_str()).collect();
+        let topic_names: std::collections::HashSet<&str> = analysis
+            .field_stats
+            .iter()
+            .map(|fs| fs.topic.as_str())
+            .collect();
         assert!(
             topic_names.contains("vehicle_attitude"),
             "should have vehicle_attitude stats"

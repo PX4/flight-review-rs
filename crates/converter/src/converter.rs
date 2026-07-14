@@ -263,8 +263,10 @@ mod tests {
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         std::path::Path::new(manifest)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // workspace root
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // workspace root
             .join("crates/converter/tests/fixtures")
             .join(name)
             .to_string_lossy()
@@ -276,7 +278,10 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let result = convert_ulog(&px4_ulog_fixture("sample.ulg"), tmp.path()).unwrap();
 
-        assert!(!result.parquet_files.is_empty(), "Should produce Parquet files");
+        assert!(
+            !result.parquet_files.is_empty(),
+            "Should produce Parquet files"
+        );
 
         // Should have one file per topic
         let has_attitude = result
@@ -340,8 +345,7 @@ mod tests {
             return;
         }
         let tmp = tempfile::tempdir().unwrap();
-        let result =
-            convert_ulog(&path, tmp.path()).unwrap();
+        let result = convert_ulog(&path, tmp.path()).unwrap();
 
         assert!(
             result.parquet_files.len() > 10,

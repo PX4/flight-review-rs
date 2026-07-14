@@ -5,7 +5,7 @@
 //! critical threshold per cell.
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;

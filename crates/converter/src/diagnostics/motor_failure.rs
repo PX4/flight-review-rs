@@ -9,7 +9,7 @@
 use std::collections::{HashSet, VecDeque};
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, MotorFailureMode,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, MotorFailureMode,
     OutputDescriptor, PlotAnchor, Severity,
 };
 use crate::analysis::nav_state_name;
@@ -110,7 +110,9 @@ impl Analyzer for MotorFailureAnalyzer {
                 if self.motor_count.is_none() {
                     let count = Self::detect_motor_count(data);
                     self.motor_count = Some(count);
-                    self.motor_windows = (0..count).map(|_| VecDeque::with_capacity(WINDOW_SIZE)).collect();
+                    self.motor_windows = (0..count)
+                        .map(|_| VecDeque::with_capacity(WINDOW_SIZE))
+                        .collect();
                     self.motor_was_active = vec![false; count];
                 }
 
@@ -139,7 +141,12 @@ impl Analyzer for MotorFailureAnalyzer {
 
                     // Check: PWM drop to zero — only if motor was previously active
                     let was_active = self.motor_was_active.get(i).copied().unwrap_or(false);
-                    if pwm == 0.0 && was_active && !self.fired.contains(&(motor_idx, MotorFailureMode::DropToZero)) {
+                    if pwm == 0.0
+                        && was_active
+                        && !self
+                            .fired
+                            .contains(&(motor_idx, MotorFailureMode::DropToZero))
+                    {
                         self.fired.insert((motor_idx, MotorFailureMode::DropToZero));
                         self.detections.push(Diagnostic {
                             id: "motor_failure".to_string(),
@@ -167,9 +174,12 @@ impl Analyzer for MotorFailureAnalyzer {
                     if let Some(window) = self.motor_windows.get(i) {
                         if window.len() == WINDOW_SIZE
                             && window.iter().all(|(_, p)| *p >= PWM_MAX_THRESHOLD)
-                            && !self.fired.contains(&(motor_idx, MotorFailureMode::LockedAtMax))
+                            && !self
+                                .fired
+                                .contains(&(motor_idx, MotorFailureMode::LockedAtMax))
                         {
-                            self.fired.insert((motor_idx, MotorFailureMode::LockedAtMax));
+                            self.fired
+                                .insert((motor_idx, MotorFailureMode::LockedAtMax));
                             let first_ts = window.front().map(|(t, _)| *t).unwrap_or(ts);
                             self.detections.push(Diagnostic {
                                 id: "motor_failure".to_string(),
@@ -180,9 +190,14 @@ impl Analyzer for MotorFailureAnalyzer {
                                     ts as f64 / 1_000_000.0,
                                 ),
                                 severity: Severity::Warning,
-                                kind: AnomalyKind::Region { end_timestamp_us: ts },
+                                kind: AnomalyKind::Region {
+                                    end_timestamp_us: ts,
+                                },
                                 timestamp_us: first_ts,
-                                anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
+                                anchor: PlotAnchor::new(
+                                    "actuator_outputs",
+                                    &format!("output[{i}]"),
+                                ),
                                 descriptor: self.output_descriptor(),
                                 evidence: Evidence::MotorFailure {
                                     motor_index: motor_idx,
@@ -261,9 +276,7 @@ mod tests {
         assert_eq!(diags[0].anchor.field, "output[1]");
         match &diags[0].evidence {
             Evidence::MotorFailure {
-                motor_index,
-                mode,
-                ..
+                motor_index, mode, ..
             } => {
                 assert_eq!(*motor_index, 1);
                 assert_eq!(*mode, MotorFailureMode::DropToZero);
@@ -303,7 +316,11 @@ mod tests {
         }
 
         let diags = Box::new(analyzer).finish();
-        assert!(diags.is_empty(), "Unused channels should not trigger motor_failure, got: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "Unused channels should not trigger motor_failure, got: {:?}",
+            diags
+        );
     }
 
     #[test]
@@ -385,7 +402,11 @@ mod tests {
         }
 
         let diags = Box::new(analyzer).finish();
-        assert_eq!(diags.len(), 1, "Should only fire once per motor per failure mode");
+        assert_eq!(
+            diags.len(),
+            1,
+            "Should only fire once per motor per failure mode"
+        );
     }
 
     #[test]

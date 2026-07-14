@@ -1,4 +1,7 @@
-use axum::{extract::{Query, State}, Json};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
 use serde::Serialize;
 use std::sync::Arc;
 
@@ -34,10 +37,7 @@ pub async fn get_stats(
         )));
     }
 
-    let period_str = params
-        .period
-        .clone()
-        .unwrap_or_else(|| "30d".to_string());
+    let period_str = params.period.clone().unwrap_or_else(|| "30d".to_string());
 
     let data = state.db.stats(&params).await?;
 

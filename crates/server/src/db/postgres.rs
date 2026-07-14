@@ -1,4 +1,6 @@
-use super::{DbError, FacetsResponse, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams};
+use super::{
+    DbError, FacetsResponse, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams,
+};
 use uuid::Uuid;
 
 #[cfg(feature = "postgres")]
@@ -156,10 +158,7 @@ pub struct PostgresStore {
 #[cfg(feature = "postgres")]
 impl PostgresStore {
     pub async fn new(url: &str) -> Result<Self, DbError> {
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(url)
-            .await?;
+        let pool = PgPoolOptions::new().max_connections(5).connect(url).await?;
 
         sqlx::raw_sql(CREATE_TABLE).execute(&pool).await?;
 
@@ -575,7 +574,10 @@ impl LogStore for PostgresStore {
         // Data query
         let data_sql = format!(
             "SELECT * FROM logs {} ORDER BY {} LIMIT ${} OFFSET ${}",
-            where_clause, order_by, param_idx, param_idx + 1
+            where_clause,
+            order_by,
+            param_idx,
+            param_idx + 1
         );
         let mut data_query = sqlx::query(&data_sql);
         for v in &bind_values {
@@ -584,19 +586,20 @@ impl LogStore for PostgresStore {
         data_query = data_query.bind(limit).bind(offset);
 
         let rows = data_query.fetch_all(&self.pool).await?;
-        let logs: Result<Vec<LogRecord>, sqlx::Error> =
-            rows.iter().map(row_to_record).collect();
+        let logs: Result<Vec<LogRecord>, sqlx::Error> = rows.iter().map(row_to_record).collect();
 
-        Ok(ListResponse {
-            logs: logs?,
-            total,
-        })
+        Ok(ListResponse { logs: logs?, total })
     }
 
     async fn facets(&self, filters: &ListFilters) -> Result<FacetsResponse, DbError> {
         let (where_clause, bind_values, _param_idx) = build_where_postgres(filters);
 
-        let columns = ["ver_hw", "vehicle_type", "ver_sw_release_str", "vibration_status"];
+        let columns = [
+            "ver_hw",
+            "vehicle_type",
+            "ver_sw_release_str",
+            "vibration_status",
+        ];
         let mut results: Vec<Vec<String>> = Vec::new();
 
         for col in &columns {
@@ -610,7 +613,10 @@ impl LogStore for PostgresStore {
                 query = query.bind(v);
             }
             let rows = query.fetch_all(&self.pool).await?;
-            let vals: Vec<String> = rows.iter().filter_map(|r| r.try_get::<String, _>(col).ok()).collect();
+            let vals: Vec<String> = rows
+                .iter()
+                .filter_map(|r| r.try_get::<String, _>(col).ok())
+                .collect();
             results.push(vals);
         }
 
@@ -618,7 +624,9 @@ impl LogStore for PostgresStore {
         let tags_sql = if where_clause.is_empty() {
             "SELECT DISTINCT tags FROM logs WHERE tags IS NOT NULL AND tags != ''".to_string()
         } else {
-            format!("SELECT DISTINCT tags FROM logs {where_clause} AND tags IS NOT NULL AND tags != ''")
+            format!(
+                "SELECT DISTINCT tags FROM logs {where_clause} AND tags IS NOT NULL AND tags != ''"
+            )
         };
         let mut tags_query = sqlx::query(&tags_sql);
         for v in &bind_values {
@@ -799,17 +807,21 @@ impl LogStore for PostgresStore {
         Ok(data)
     }
 
-    async fn insert_parameters(&self, log_id: Uuid, params: &[(String, f64)]) -> Result<(), DbError> {
+    async fn insert_parameters(
+        &self,
+        log_id: Uuid,
+        params: &[(String, f64)],
+    ) -> Result<(), DbError> {
         for (name, value) in params {
             sqlx::query(
                 "INSERT INTO log_parameters (log_id, name, value) VALUES ($1, $2, $3) \
-                 ON CONFLICT (log_id, name) DO UPDATE SET value = EXCLUDED.value"
+                 ON CONFLICT (log_id, name) DO UPDATE SET value = EXCLUDED.value",
             )
-                .bind(log_id)
-                .bind(name)
-                .bind(value)
-                .execute(&self.pool)
-                .await?;
+            .bind(log_id)
+            .bind(name)
+            .bind(value)
+            .execute(&self.pool)
+            .await?;
         }
         Ok(())
     }
@@ -833,17 +845,21 @@ impl LogStore for PostgresStore {
         for tag in tags {
             sqlx::query(
                 "INSERT INTO log_tags (log_id, tag) VALUES ($1, $2) \
-                 ON CONFLICT (log_id, tag) DO NOTHING"
+                 ON CONFLICT (log_id, tag) DO NOTHING",
             )
-                .bind(log_id)
-                .bind(tag)
-                .execute(&self.pool)
-                .await?;
+            .bind(log_id)
+            .bind(tag)
+            .execute(&self.pool)
+            .await?;
         }
         Ok(())
     }
 
-    async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError> {
+    async fn insert_errors(
+        &self,
+        log_id: Uuid,
+        errors: &[(String, String, Option<u64>)],
+    ) -> Result<(), DbError> {
         for (level, message, timestamp_us) in errors {
             sqlx::query(
                 "INSERT INTO log_errors (log_id, level, message, timestamp_us) VALUES ($1, $2, $3, $4)"
@@ -858,7 +874,11 @@ impl LogStore for PostgresStore {
         Ok(())
     }
 
-    async fn insert_field_stats(&self, log_id: Uuid, stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+    async fn insert_field_stats(
+        &self,
+        log_id: Uuid,
+        stats: &[super::FieldStatRecord],
+    ) -> Result<(), DbError> {
         for s in stats {
             sqlx::query(
                 "INSERT INTO log_field_stats (log_id, topic, field, min_val, max_val, mean_val, count) \
@@ -880,7 +900,11 @@ impl LogStore for PostgresStore {
         Ok(())
     }
 
-    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
+    async fn insert_diagnostics(
+        &self,
+        log_id: Uuid,
+        diagnostics: &[super::DiagnosticRecord],
+    ) -> Result<(), DbError> {
         for d in diagnostics {
             sqlx::query(
                 "INSERT INTO log_diagnostics (log_id, diagnostic_id, severity, summary, timestamp_us, end_timestamp_us, evidence) \
@@ -900,12 +924,30 @@ impl LogStore for PostgresStore {
     }
 
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
-        sqlx::query("DELETE FROM log_parameters WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_topics WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_tags WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_errors WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_field_stats WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = $1").bind(log_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_parameters WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_topics WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_tags WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_errors WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_field_stats WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = $1")
+            .bind(log_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -949,7 +991,11 @@ impl LogStore for PostgresStore {
         )))
     }
 
-    async fn insert_parameters(&self, _log_id: Uuid, _params: &[(String, f64)]) -> Result<(), DbError> {
+    async fn insert_parameters(
+        &self,
+        _log_id: Uuid,
+        _params: &[(String, f64)],
+    ) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))
@@ -967,19 +1013,31 @@ impl LogStore for PostgresStore {
         )))
     }
 
-    async fn insert_errors(&self, _log_id: Uuid, _errors: &[(String, String, Option<u64>)]) -> Result<(), DbError> {
+    async fn insert_errors(
+        &self,
+        _log_id: Uuid,
+        _errors: &[(String, String, Option<u64>)],
+    ) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))
     }
 
-    async fn insert_field_stats(&self, _log_id: Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+    async fn insert_field_stats(
+        &self,
+        _log_id: Uuid,
+        _stats: &[super::FieldStatRecord],
+    ) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))
     }
 
-    async fn insert_diagnostics(&self, _log_id: Uuid, _diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
+    async fn insert_diagnostics(
+        &self,
+        _log_id: Uuid,
+        _diagnostics: &[super::DiagnosticRecord],
+    ) -> Result<(), DbError> {
         Err(DbError::Sqlx(sqlx::Error::Configuration(
             "postgres feature is not enabled".into(),
         )))
