@@ -259,18 +259,16 @@ fn descriptor_fields_match_evidence_keys() {
             !diags.is_empty(),
             "analyzer '{}' produced no diagnostics from fixture '{}' — \
              can't verify descriptor parity",
-            id, fixture_name,
+            id,
+            fixture_name,
         );
 
-        let descriptor_names: BTreeSet<String> = descriptor
-            .fields
-            .iter()
-            .map(|f| f.name.clone())
-            .collect();
+        let descriptor_names: BTreeSet<String> =
+            descriptor.fields.iter().map(|f| f.name.clone()).collect();
 
         for diag in &diags {
-            let evidence_json = serde_json::to_value(&diag.evidence)
-                .expect("Evidence must serialize");
+            let evidence_json =
+                serde_json::to_value(&diag.evidence).expect("Evidence must serialize");
             let evidence_obj = evidence_json
                 .as_object()
                 .expect("Evidence must serialize to JSON object");
@@ -282,7 +280,8 @@ fn descriptor_fields_match_evidence_keys() {
                 .collect();
 
             assert_eq!(
-                descriptor_names, evidence_names,
+                descriptor_names,
+                evidence_names,
                 "descriptor/evidence field mismatch for '{}'\n\
                  descriptor declares: {:?}\n\
                  evidence contains:   {:?}\n\
@@ -291,8 +290,12 @@ fn descriptor_fields_match_evidence_keys() {
                 id,
                 descriptor_names,
                 evidence_names,
-                evidence_names.difference(&descriptor_names).collect::<Vec<_>>(),
-                descriptor_names.difference(&evidence_names).collect::<Vec<_>>(),
+                evidence_names
+                    .difference(&descriptor_names)
+                    .collect::<Vec<_>>(),
+                descriptor_names
+                    .difference(&evidence_names)
+                    .collect::<Vec<_>>(),
             );
         }
 

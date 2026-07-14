@@ -8,7 +8,7 @@
 //! Add a fixture when one becomes available.
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
@@ -64,7 +64,9 @@ impl RcLossAnalyzer {
                 start_us as f64 / 1_000_000.0,
             ),
             severity,
-            kind: AnomalyKind::Region { end_timestamp_us: end_us },
+            kind: AnomalyKind::Region {
+                end_timestamp_us: end_us,
+            },
             timestamp_us: start_us,
             anchor: PlotAnchor::new("input_rc", "rc_lost"),
             descriptor: self.output_descriptor(),
@@ -315,9 +317,7 @@ mod tests {
     fn handles_missing_fields() {
         let mut analyzer = RcLossAnalyzer::new();
 
-        let (fmt, data) = MessageBuilder::new("input_rc")
-            .timestamp(1_000_000)
-            .build();
+        let (fmt, data) = MessageBuilder::new("input_rc").timestamp(1_000_000).build();
         let dm = make_data_message(&fmt, &data);
         analyzer.on_message(&dm); // must not panic
 

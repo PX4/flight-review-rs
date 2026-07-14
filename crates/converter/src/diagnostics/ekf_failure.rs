@@ -6,7 +6,7 @@
 //! unreliable.
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
@@ -69,7 +69,9 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Critical,
-                    kind: AnomalyKind::Region { end_timestamp_us: ts },
+                    kind: AnomalyKind::Region {
+                        end_timestamp_us: ts,
+                    },
                     timestamp_us: start,
                     anchor: PlotAnchor::new("estimator_status", self.field_name),
                     descriptor: descriptor.clone(),
@@ -90,7 +92,9 @@ impl InnovationTracker {
                         start as f64 / 1_000_000.0,
                     ),
                     severity: Severity::Warning,
-                    kind: AnomalyKind::Region { end_timestamp_us: ts },
+                    kind: AnomalyKind::Region {
+                        end_timestamp_us: ts,
+                    },
                     timestamp_us: start,
                     anchor: PlotAnchor::new("estimator_status", self.field_name),
                     descriptor: descriptor.clone(),
@@ -266,7 +270,10 @@ mod tests {
         analyzer.on_message(&dm);
 
         let diags = Box::new(analyzer).finish();
-        assert!(diags.is_empty(), "Should not fire if ratio drops before warning duration");
+        assert!(
+            diags.is_empty(),
+            "Should not fire if ratio drops before warning duration"
+        );
     }
 
     #[test]
@@ -292,10 +299,7 @@ mod tests {
     #[test]
     fn detects_real_ekf_failure() {
         let diags = analyze_fixture_for("ekf_failure.ulg", "ekf_failure");
-        assert!(
-            !diags.is_empty(),
-            "Should detect EKF failures in real log"
-        );
+        assert!(!diags.is_empty(), "Should detect EKF failures in real log");
         // Should detect at least one escalation to critical
         assert!(
             diags.iter().any(|d| d.severity == Severity::Critical),

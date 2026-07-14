@@ -104,9 +104,7 @@ async fn run_server(config: ServeConfig) {
     let db = db::create_db(&config.db)
         .await
         .expect("failed to connect to database");
-    let storage = Arc::new(
-        FileStorage::from_url(&config.storage).expect("failed to init storage"),
-    );
+    let storage = Arc::new(FileStorage::from_url(&config.storage).expect("failed to init storage"));
 
     let state = Arc::new(AppState {
         db,
@@ -124,9 +122,7 @@ async fn run_server(config: ServeConfig) {
         .expect("failed to bind listener");
 
     tracing::info!("server listening on {addr}");
-    axum::serve(listener, app)
-        .await
-        .expect("server error");
+    axum::serve(listener, app).await.expect("server error");
 }
 
 /// Map v1 MavType string to a normalized vehicle type category.
@@ -180,7 +176,7 @@ async fn run_migrate(config: MigrateConfig) {
             g.SoftwareVersion, g.NumLoggedErrors, g.NumLoggedWarnings, g.FlightModes, \
             g.FlightModeDurations, g.UUID, g.StartTime \
          FROM Logs l \
-         LEFT JOIN LogsGenerated g ON l.Id = g.Id"
+         LEFT JOIN LogsGenerated g ON l.Id = g.Id",
     )
     .fetch_all(&v1_pool)
     .await
@@ -251,9 +247,7 @@ async fn run_migrate(config: MigrateConfig) {
         let sys_name = hardware.clone().or(mav_type);
         let ver_hw = hardware;
         let ver_sw_release_str = software_version;
-        let flight_duration_s = duration_str
-            .as_deref()
-            .and_then(|s| s.parse::<f64>().ok());
+        let flight_duration_s = duration_str.as_deref().and_then(|s| s.parse::<f64>().ok());
 
         // Pilot-provided context fields from v1 Logs table
         let description: Option<String> = row.try_get("Description").ok().flatten();
@@ -327,7 +321,13 @@ async fn run_migrate(config: MigrateConfig) {
         }
 
         if (i + 1) % 1000 == 0 {
-            tracing::info!("Progress: {}/{} processed ({} imported, {} skipped)", i + 1, total, imported, skipped);
+            tracing::info!(
+                "Progress: {}/{} processed ({} imported, {} skipped)",
+                i + 1,
+                total,
+                imported,
+                skipped
+            );
         }
     }
 

@@ -27,8 +27,7 @@ impl FileStorage {
         if url.starts_with("file://") {
             let path = url.strip_prefix("file://").unwrap();
             std::fs::create_dir_all(path)?;
-            let store =
-                LocalFileSystem::new_with_prefix(path)?;
+            let store = LocalFileSystem::new_with_prefix(path)?;
             Ok(Self {
                 store: Arc::new(store),
             })
@@ -36,8 +35,9 @@ impl FileStorage {
             #[cfg(feature = "s3")]
             {
                 let without_scheme = url.strip_prefix("s3://").unwrap();
-                let (bucket, prefix) =
-                    without_scheme.split_once('/').unwrap_or((without_scheme, ""));
+                let (bucket, prefix) = without_scheme
+                    .split_once('/')
+                    .unwrap_or((without_scheme, ""));
                 let s3 = object_store::aws::AmazonS3Builder::from_env()
                     .with_bucket_name(bucket)
                     .build()?;
@@ -93,11 +93,7 @@ impl FileStorage {
     }
 
     /// Get a file for a log.
-    pub async fn get_file(
-        &self,
-        log_id: Uuid,
-        filename: &str,
-    ) -> Result<Bytes, StorageError> {
+    pub async fn get_file(&self, log_id: Uuid, filename: &str) -> Result<Bytes, StorageError> {
         let path = Self::log_file_path(log_id, filename);
         let result = self.store.get(&path).await?;
         Ok(result.bytes().await?)

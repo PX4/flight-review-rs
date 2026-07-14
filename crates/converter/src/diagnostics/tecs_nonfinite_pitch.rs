@@ -10,7 +10,7 @@
 //! per sample is cheap and fits inside the diagnostics budget.
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity, TecsNonfinitePitchField,
 };
 use px4_ulog::stream_parser::model::DataMessage;
@@ -136,7 +136,12 @@ mod tests {
     use super::*;
     use crate::diagnostics::testing::*;
 
-    fn tecs_msg(ts: u64, pitch_integ: f32, pitch_sp_rad: f32, throttle_integ: f32) -> (px4_ulog::stream_parser::model::FlattenedFormat, Vec<u8>) {
+    fn tecs_msg(
+        ts: u64,
+        pitch_integ: f32,
+        pitch_sp_rad: f32,
+        throttle_integ: f32,
+    ) -> (px4_ulog::stream_parser::model::FlattenedFormat, Vec<u8>) {
         MessageBuilder::new("tecs_status")
             .timestamp(ts)
             .field_f32("pitch_integ", pitch_integ)
@@ -218,7 +223,10 @@ mod tests {
         analyzer.on_message(&make_data_message(&fmt, &data));
         let diags = Box::new(analyzer).finish();
         match &diags[0].evidence {
-            Evidence::TecsNonfinitePitch { throttle_integ_nonfinite, .. } => {
+            Evidence::TecsNonfinitePitch {
+                throttle_integ_nonfinite,
+                ..
+            } => {
                 assert!(*throttle_integ_nonfinite)
             }
             _ => panic!("expected TecsNonfinitePitch"),

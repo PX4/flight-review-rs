@@ -138,10 +138,8 @@ pub fn extract_signals(
             .push(req.field.as_str());
     }
 
-    let mut signals: HashMap<SignalRequest, TimeSeries> = requests
-        .iter()
-        .map(|r| (r.clone(), Vec::new()))
-        .collect();
+    let mut signals: HashMap<SignalRequest, TimeSeries> =
+        requests.iter().map(|r| (r.clone(), Vec::new())).collect();
 
     read_file_with_simple_callback(path, &mut |msg| {
         if let Message::Data(data) = msg {
@@ -158,9 +156,7 @@ pub fn extract_signals(
                     let t_s = ts as f64 / 1_000_000.0;
 
                     for &field in fields {
-                        if let Ok(parser) =
-                            data.flattened_format.get_field_parser::<f32>(field)
-                        {
+                        if let Ok(parser) = data.flattened_format.get_field_parser::<f32>(field) {
                             let val = parser.parse(data.data) as f64;
                             if val.is_finite() {
                                 let key = SignalRequest::new(topic, field);
@@ -193,10 +189,8 @@ pub fn run_analyses(
     analyses: &[Box<dyn SignalAnalysis>],
 ) -> Result<HashMap<String, serde_json::Value>, AnalysisError> {
     // Collect all required signals
-    let all_requests: HashSet<SignalRequest> = analyses
-        .iter()
-        .flat_map(|a| a.required_signals())
-        .collect();
+    let all_requests: HashSet<SignalRequest> =
+        analyses.iter().flat_map(|a| a.required_signals()).collect();
 
     // Single extraction pass
     let store = extract_signals(path, &all_requests)?;

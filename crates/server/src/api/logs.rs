@@ -237,8 +237,7 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
     let file_size = ulg_data.len() as i64;
 
     // Write to temp file and convert
-    let tmp_dir =
-        tempfile::tempdir().map_err(|e| ApiError::Internal(format!("tempdir: {e}")))?;
+    let tmp_dir = tempfile::tempdir().map_err(|e| ApiError::Internal(format!("tempdir: {e}")))?;
     let input_path = tmp_dir.path().join("input.ulg");
     tokio::fs::write(&input_path, &ulg_data).await?;
 
@@ -276,10 +275,7 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
 
     // Copy the raw .ulg into the UUID directory so everything lives together
     let ulg_filename = format!("{}.ulg", id);
-    state
-        .storage
-        .put_file(id, &ulg_filename, ulg_data)
-        .await?;
+    state.storage.put_file(id, &ulg_filename, ulg_data).await?;
 
     // Update the DB record with fields extracted from the conversion
     if let Some(mut record) = state.db.get(id).await? {
@@ -290,7 +286,10 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
             .ver_sw_release_str
             .clone()
             .or(record.ver_sw_release_str);
-        record.flight_duration_s = result.metadata.flight_duration_s.or(record.flight_duration_s);
+        record.flight_duration_s = result
+            .metadata
+            .flight_duration_s
+            .or(record.flight_duration_s);
         record.topic_count = result.metadata.topics.len() as i32;
         record.lat = result
             .metadata
@@ -330,13 +329,9 @@ async fn lazy_convert(state: &crate::AppState, id: Uuid) -> Result<bool, ApiErro
             if let (Some(lat_val), Some(lon_val), Some(token)) =
                 (record.lat, record.lon, state.mapbox_token.as_deref())
             {
-                if let Some(name) = crate::geocode::reverse_geocode(
-                    &state.http_client,
-                    token,
-                    lat_val,
-                    lon_val,
-                )
-                .await
+                if let Some(name) =
+                    crate::geocode::reverse_geocode(&state.http_client, token, lat_val, lon_val)
+                        .await
                 {
                     tracing::info!(log_id = %id, location = %name, "geocoded location (lazy)");
                     record.location_name = Some(name);
@@ -387,9 +382,7 @@ fn parse_byte_range(range_str: &str) -> Result<(u64, u64), ApiError> {
     let range_spec = &range_str[bytes_prefix.len()..];
     let parts: Vec<&str> = range_spec.splitn(2, '-').collect();
     if parts.len() != 2 {
-        return Err(ApiError::BadRequest(format!(
-            "invalid range: {range_str}"
-        )));
+        return Err(ApiError::BadRequest(format!("invalid range: {range_str}")));
     }
 
     let start: u64 = parts[0]

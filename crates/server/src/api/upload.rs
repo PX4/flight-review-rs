@@ -31,10 +31,7 @@ pub async fn upload(
         .map_err(|e| ApiError::BadRequest(format!("multipart error: {e}")))?
     {
         if field.name() == Some("file") {
-            let filename = field
-                .file_name()
-                .unwrap_or("upload.ulg")
-                .to_string();
+            let filename = field.file_name().unwrap_or("upload.ulg").to_string();
             let data = field
                 .bytes()
                 .await
@@ -125,11 +122,10 @@ pub async fn upload(
     // 5b. Reverse-geocode if location_name was not provided by the user
     let lat = result.metadata.gps_first_fix.as_ref().map(|g| g.lat_deg);
     let lon = result.metadata.gps_first_fix.as_ref().map(|g| g.lon_deg);
-    let user_gave_location = location_name
-        .as_ref()
-        .is_some_and(|s| !s.trim().is_empty());
+    let user_gave_location = location_name.as_ref().is_some_and(|s| !s.trim().is_empty());
     if !user_gave_location {
-        if let (Some(lat_val), Some(lon_val), Some(token)) = (lat, lon, state.mapbox_token.as_deref())
+        if let (Some(lat_val), Some(lon_val), Some(token)) =
+            (lat, lon, state.mapbox_token.as_deref())
         {
             match crate::geocode::reverse_geocode(&state.http_client, token, lat_val, lon_val).await
             {
@@ -216,7 +212,9 @@ pub async fn upload(
                     summary: d.summary.clone(),
                     timestamp_us: Some(d.timestamp_us as i64),
                     end_timestamp_us: match &d.kind {
-                        flight_review::diagnostics::AnomalyKind::Region { end_timestamp_us } => Some(*end_timestamp_us as i64),
+                        flight_review::diagnostics::AnomalyKind::Region { end_timestamp_us } => {
+                            Some(*end_timestamp_us as i64)
+                        }
                         flight_review::diagnostics::AnomalyKind::Point => None,
                     },
                     evidence: serde_json::to_string(&d.evidence).ok(),

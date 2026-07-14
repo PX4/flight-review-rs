@@ -18,7 +18,7 @@ pub async fn reverse_geocode(
 
     let resp = tokio::time::timeout(Duration::from_secs(5), client.get(&url).send())
         .await
-        .ok()?  // timeout
+        .ok()? // timeout
         .ok()?; // request error
 
     if !resp.status().is_success() {
@@ -63,10 +63,7 @@ pub async fn reverse_geocode(
 
         // Extract country info from context on any feature
         if country_code.is_none() || country.is_none() {
-            if let Some(ctx) = props
-                .get("context")
-                .and_then(|c| c.get("country"))
-            {
+            if let Some(ctx) = props.get("context").and_then(|c| c.get("country")) {
                 if country_code.is_none() {
                     country_code = ctx
                         .get("country_code")
@@ -84,14 +81,12 @@ pub async fn reverse_geocode(
         (Some(p), Some(c)) => format!("{}, {}", p, c),
         (Some(p), None) => p.to_string(),
         (None, Some(c)) => c.to_string(),
-        (None, None) => {
-            features
-                .first()
-                .and_then(|f| f.get("properties"))
-                .and_then(|p| p.get("full_address"))
-                .and_then(|v| v.as_str())
-                .map(String::from)?
-        }
+        (None, None) => features
+            .first()
+            .and_then(|f| f.get("properties"))
+            .and_then(|p| p.get("full_address"))
+            .and_then(|v| v.as_str())
+            .map(String::from)?,
     };
 
     // Append country code if available: "City, Country [CC]"

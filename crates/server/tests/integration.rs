@@ -19,8 +19,10 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
 
     // First: check local fixtures in the converter crate
     let local = std::path::Path::new(manifest)
-        .parent().unwrap()  // crates/
-        .parent().unwrap()  // workspace root
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap() // workspace root
         .join("crates/converter/tests/fixtures")
         .join(name);
     if local.exists() {
@@ -29,9 +31,12 @@ fn fixture_path(name: &str) -> std::path::PathBuf {
 
     // Fallback: px4-ulog-rs repo (local dev)
     std::path::Path::new(manifest)
-        .parent().unwrap()  // crates/
-        .parent().unwrap()  // workspace root
-        .parent().unwrap()  // ulog/
+        .parent()
+        .unwrap() // crates/
+        .parent()
+        .unwrap() // workspace root
+        .parent()
+        .unwrap() // ulog/
         .join("px4-ulog-rs/tests/fixtures")
         .join(name)
 }
@@ -121,7 +126,10 @@ async fn test_full_lifecycle() {
             "version field '{field}' missing or empty: {body:?}"
         );
     }
-    assert_eq!(body["px4_ulog"], "0.6.1", "px4-ulog version should match Cargo.lock");
+    assert_eq!(
+        body["px4_ulog"], "0.6.1",
+        "px4-ulog version should match Cargo.lock"
+    );
 
     // 2. Upload a log
     let fixture = fixture_path("sample.ulg");
@@ -187,7 +195,10 @@ async fn test_full_lifecycle() {
 
     // 5. Get metadata.json
     let resp = client
-        .get(format!("{}/api/logs/{}/data/metadata.json", base_url, log_id))
+        .get(format!(
+            "{}/api/logs/{}/data/metadata.json",
+            base_url, log_id
+        ))
         .send()
         .await
         .unwrap();
@@ -219,10 +230,7 @@ async fn test_full_lifecycle() {
 
     // 7. Get raw .ulg file
     let resp = client
-        .get(format!(
-            "{}/api/logs/{}/data/sample.ulg",
-            base_url, log_id
-        ))
+        .get(format!("{}/api/logs/{}/data/sample.ulg", base_url, log_id))
         .send()
         .await
         .unwrap();
@@ -244,10 +252,7 @@ async fn test_full_lifecycle() {
 
     // 9. Search filters
     let resp = client
-        .get(format!(
-            "{}/api/logs?sys_name=PX4&has_gps=false",
-            base_url
-        ))
+        .get(format!("{}/api/logs?sys_name=PX4&has_gps=false", base_url))
         .send()
         .await
         .unwrap();
@@ -258,10 +263,7 @@ async fn test_full_lifecycle() {
 
     // 10. Delete with wrong token — should fail
     let resp = client
-        .delete(format!(
-            "{}/api/logs/{}?token=wrongtoken",
-            base_url, log_id
-        ))
+        .delete(format!("{}/api/logs/{}?token=wrongtoken", base_url, log_id))
         .send()
         .await
         .unwrap();

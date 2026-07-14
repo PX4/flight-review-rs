@@ -337,12 +337,28 @@ pub trait LogStore: Send + Sync {
     async fn stats(&self, params: &StatsParams) -> Result<Vec<StatRow>, DbError>;
 
     // Junction table methods
-    async fn insert_parameters(&self, log_id: Uuid, params: &[(String, f64)]) -> Result<(), DbError>;
+    async fn insert_parameters(
+        &self,
+        log_id: Uuid,
+        params: &[(String, f64)],
+    ) -> Result<(), DbError>;
     async fn insert_topics(&self, log_id: Uuid, topics: &[(String, i32)]) -> Result<(), DbError>;
     async fn insert_tags(&self, log_id: Uuid, tags: &[String]) -> Result<(), DbError>;
-    async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError>;
-    async fn insert_field_stats(&self, log_id: Uuid, stats: &[FieldStatRecord]) -> Result<(), DbError>;
-    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[DiagnosticRecord]) -> Result<(), DbError>;
+    async fn insert_errors(
+        &self,
+        log_id: Uuid,
+        errors: &[(String, String, Option<u64>)],
+    ) -> Result<(), DbError>;
+    async fn insert_field_stats(
+        &self,
+        log_id: Uuid,
+        stats: &[FieldStatRecord],
+    ) -> Result<(), DbError>;
+    async fn insert_diagnostics(
+        &self,
+        log_id: Uuid,
+        diagnostics: &[DiagnosticRecord],
+    ) -> Result<(), DbError>;
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError>;
 }
 
@@ -364,7 +380,12 @@ pub fn bounding_box(lat: f64, lon: f64, radius_km: f64) -> (f64, f64, f64, f64) 
     } else {
         radius_km / (111.32 * cos_lat)
     };
-    (lat - lat_delta, lat + lat_delta, lon - lon_delta, lon + lon_delta)
+    (
+        lat - lat_delta,
+        lat + lat_delta,
+        lon - lon_delta,
+        lon + lon_delta,
+    )
 }
 
 /// A record for the `log_diagnostics` junction table.

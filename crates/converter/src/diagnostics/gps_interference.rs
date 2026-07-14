@@ -6,7 +6,7 @@
 //! - Satellite count drops significantly below baseline
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
@@ -124,25 +124,28 @@ impl Analyzer for GpsInterferenceAnalyzer {
         let current_sats = sats.unwrap_or(0);
 
         // EPH spike detection
-        let eph_spike = baseline_eph < 2.0 && current_eph > EPH_SPIKE_THRESHOLD && current_eph.is_finite();
+        let eph_spike =
+            baseline_eph < 2.0 && current_eph > EPH_SPIKE_THRESHOLD && current_eph.is_finite();
         // EPV spike detection
         let epv_spike = current_epv > EPV_THRESHOLD && current_epv.is_finite();
         // Satellite drop detection
-        let sats_drop = baseline_sats > 0.0
-            && (current_sats as f64) < baseline_sats * (1.0 - SATS_DROP_RATIO);
+        let sats_drop =
+            baseline_sats > 0.0 && (current_sats as f64) < baseline_sats * (1.0 - SATS_DROP_RATIO);
 
         if eph_spike || epv_spike || sats_drop {
-            let severity = if current_eph > EPH_CRITICAL_THRESHOLD
-                || current_sats < SATS_CRITICAL_MIN
-            {
-                Severity::Critical
-            } else {
-                Severity::Warning
-            };
+            let severity =
+                if current_eph > EPH_CRITICAL_THRESHOLD || current_sats < SATS_CRITICAL_MIN {
+                    Severity::Critical
+                } else {
+                    Severity::Warning
+                };
 
             let mut reasons = Vec::new();
             if eph_spike {
-                reasons.push(format!("EPH {:.1}m (baseline {:.1}m)", current_eph, baseline_eph));
+                reasons.push(format!(
+                    "EPH {:.1}m (baseline {:.1}m)",
+                    current_eph, baseline_eph
+                ));
             }
             if epv_spike {
                 reasons.push(format!("EPV {:.1}m", current_epv));

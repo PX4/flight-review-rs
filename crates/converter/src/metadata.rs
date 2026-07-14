@@ -178,7 +178,6 @@ pub struct TopicInfo {
     pub multi_id: u8,
 }
 
-
 /// Extract metadata from a ULog file using the streaming parser.
 pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
     let mut meta = FlightMetadata::default();
@@ -187,9 +186,9 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
     let data = std::fs::read(path)?;
     if data.len() >= 16 {
         let mut parser = px4_ulog::stream_parser::LogParser::default();
-        parser.consume_bytes(&data[..16]).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e))
-        })?;
+        parser
+            .consume_bytes(&data[..16])
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{}", e)))?;
         meta.start_timestamp_us = parser.timestamp();
         meta.file_version = data[7];
     }
@@ -237,25 +236,31 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                 // Extract GPS first-fix from vehicle_gps_position
                 if meta.gps_first_fix.is_none() && topic == "vehicle_gps_position" {
                     // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
-                    let coords: Option<(f64, f64, f64)> =
-                        if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
-                            data.flattened_format.get_field_parser::<f64>("latitude_deg"),
-                            data.flattened_format.get_field_parser::<f64>("longitude_deg"),
-                            data.flattened_format.get_field_parser::<f64>("altitude_msl_m"),
-                        ) {
-                            Some((lat_p.parse(data.data), lon_p.parse(data.data), alt_p.parse(data.data)))
-                        } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
-                            data.flattened_format.get_field_parser::<i32>("lat"),
-                            data.flattened_format.get_field_parser::<i32>("lon"),
-                            data.flattened_format.get_field_parser::<i32>("alt"),
-                        ) {
-                            let lat = lat_p.parse(data.data);
-                            let lon = lon_p.parse(data.data);
-                            let alt = alt_p.parse(data.data);
-                            Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
-                        } else {
-                            None
-                        };
+                    let coords: Option<(f64, f64, f64)> = if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                        data.flattened_format
+                            .get_field_parser::<f64>("latitude_deg"),
+                        data.flattened_format
+                            .get_field_parser::<f64>("longitude_deg"),
+                        data.flattened_format
+                            .get_field_parser::<f64>("altitude_msl_m"),
+                    ) {
+                        Some((
+                            lat_p.parse(data.data),
+                            lon_p.parse(data.data),
+                            alt_p.parse(data.data),
+                        ))
+                    } else if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
+                        data.flattened_format.get_field_parser::<i32>("lat"),
+                        data.flattened_format.get_field_parser::<i32>("lon"),
+                        data.flattened_format.get_field_parser::<i32>("alt"),
+                    ) {
+                        let lat = lat_p.parse(data.data);
+                        let lon = lon_p.parse(data.data);
+                        let alt = alt_p.parse(data.data);
+                        Some((lat as f64 * 1e-7, lon as f64 * 1e-7, alt as f64 * 1e-3))
+                    } else {
+                        None
+                    };
 
                     if let Some((lat_deg, lon_deg, alt_m)) = coords {
                         if lat_deg != 0.0 && lon_deg != 0.0 {
@@ -375,9 +380,7 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                         }
                     }
                 }
-                let buffer = multi_info_buffers
-                    .entry(msg.key.to_string())
-                    .or_default();
+                let buffer = multi_info_buffers.entry(msg.key.to_string()).or_default();
                 // Each continued fragment is a separate line — add newline
                 // separator so they don't run together when displayed.
                 if !buffer.is_empty() && msg.is_continued {
@@ -434,8 +437,10 @@ mod tests {
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
         std::path::Path::new(manifest)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // workspace root
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // workspace root
             .join("crates/converter/tests/fixtures")
             .join(name)
             .to_string_lossy()
@@ -501,7 +506,10 @@ mod tests {
         assert_eq!(meta.appended_offsets.len(), 3);
 
         // Derived fields
-        assert!(meta.flight_duration_s.unwrap() > 100.0, "Should have substantial flight duration");
+        assert!(
+            meta.flight_duration_s.unwrap() > 100.0,
+            "Should have substantial flight duration"
+        );
         assert_eq!(meta.ver_sw_release_str.as_deref(), Some("v1.14.4"));
 
         // GPS first fix
@@ -514,7 +522,10 @@ mod tests {
         assert!(meta.default_parameters.len() > 100);
 
         // Multi-info
-        assert!(!meta.multi_info.is_empty(), "Should have multi-info messages");
+        assert!(
+            !meta.multi_info.is_empty(),
+            "Should have multi-info messages"
+        );
         assert!(meta.multi_info.contains_key("metadata_events"));
     }
 
@@ -530,13 +541,18 @@ mod tests {
 
         // All major sections present in JSON
         for field in &[
-            "parameters", "logged_messages", "multi_info", "default_parameters",
-            "flight_duration_s", "ver_sw_release_str", "gps_first_fix",
-            "compat_flags", "incompat_flags", "file_version",
+            "parameters",
+            "logged_messages",
+            "multi_info",
+            "default_parameters",
+            "flight_duration_s",
+            "ver_sw_release_str",
+            "gps_first_fix",
+            "compat_flags",
+            "incompat_flags",
+            "file_version",
         ] {
             assert!(json.contains(field), "JSON should contain '{}'", field);
         }
     }
-
-
 }

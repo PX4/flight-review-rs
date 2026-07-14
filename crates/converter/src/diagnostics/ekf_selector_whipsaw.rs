@@ -14,7 +14,7 @@
 //!   selector switches to (indicates switching to a degraded instance)
 
 use super::{
-    parse_field, AnomalyKind, Analyzer, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
+    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
     PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
@@ -185,9 +185,7 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
             // current window. `trim_window` above already aged out older ones.
             let switched_to_degraded = !self.degraded_switch_times.is_empty();
 
-            let severity = if switches_in_window >= CRITICAL_SWITCH_COUNT
-                || switched_to_degraded
-            {
+            let severity = if switches_in_window >= CRITICAL_SWITCH_COUNT || switched_to_degraded {
                 Severity::Critical
             } else {
                 Severity::Warning
@@ -221,12 +219,11 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
                 id: "ekf_selector_whipsaw".to_string(),
                 summary,
                 severity,
-                kind: AnomalyKind::Region { end_timestamp_us: ts },
+                kind: AnomalyKind::Region {
+                    end_timestamp_us: ts,
+                },
                 timestamp_us: window_start,
-                anchor: PlotAnchor::new(
-                    "estimator_selector_status",
-                    "instance_changed_count",
-                ),
+                anchor: PlotAnchor::new("estimator_selector_status", "instance_changed_count"),
                 descriptor: self.output_descriptor(),
                 evidence: Evidence::EkfSelectorWhipsaw {
                     switch_count: switches_in_window,
@@ -288,12 +285,7 @@ mod tests {
         for i in 0..5 {
             let ts = (i as u64 + 1) * 1_000_000;
             let primary = if i % 2 == 0 { 0 } else { 1 };
-            let (fmt, data) = selector_msg(
-                ts,
-                primary,
-                i as u32,
-                &[(0, 0.5), (1, 0.5)],
-            );
+            let (fmt, data) = selector_msg(ts, primary, i as u32, &[(0, 0.5), (1, 0.5)]);
             let dm = make_data_message(&fmt, &data);
             analyzer.on_message(&dm);
         }
@@ -311,12 +303,7 @@ mod tests {
         for i in 0..5 {
             let ts = (i as u64 + 1) * 1_000_000;
             let primary = if i % 2 == 0 { 0 } else { 1 };
-            let (fmt, data) = selector_msg(
-                ts,
-                primary,
-                i as u32,
-                &[(0, 2.0), (1, 0.3)],
-            );
+            let (fmt, data) = selector_msg(ts, primary, i as u32, &[(0, 2.0), (1, 0.3)]);
             let dm = make_data_message(&fmt, &data);
             analyzer.on_message(&dm);
         }
@@ -364,7 +351,10 @@ mod tests {
         assert!(
             matches!(
                 &diags[0].evidence,
-                Evidence::EkfSelectorWhipsaw { switched_to_degraded: false, .. }
+                Evidence::EkfSelectorWhipsaw {
+                    switched_to_degraded: false,
+                    ..
+                }
             ),
             "switched_to_degraded must be false once the degraded switch ages out"
         );
@@ -433,10 +423,7 @@ mod tests {
 
     #[test]
     fn detects_real_ekf_selector_whipsaw() {
-        let diags = analyze_fixture_for(
-            "ekf_selector_whipsaw.ulg",
-            "ekf_selector_whipsaw",
-        );
+        let diags = analyze_fixture_for("ekf_selector_whipsaw.ulg", "ekf_selector_whipsaw");
         assert!(
             !diags.is_empty(),
             "Should detect whipsaw in real PX4 #27013 log"
@@ -463,10 +450,7 @@ mod tests {
         // Real multi-EKF flight from PX4 PR #23337 (post-fix, ARK_PI6X). The
         // selector is healthy here, so the analyzer must stay silent even
         // though multiple EKF instances are active.
-        let diags = analyze_fixture_for(
-            "ekf_selector_no_whipsaw.ulg",
-            "ekf_selector_whipsaw",
-        );
+        let diags = analyze_fixture_for("ekf_selector_no_whipsaw.ulg", "ekf_selector_whipsaw");
         assert!(
             diags.is_empty(),
             "Clean multi-EKF #23337 log should produce no whipsaw detections, got {}",
