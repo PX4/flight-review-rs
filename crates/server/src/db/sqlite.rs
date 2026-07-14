@@ -1,5 +1,8 @@
 #[cfg(feature = "sqlite")]
-use super::{period_to_days, DbError, FacetsResponse, ListFilters, ListResponse, LogRecord, LogStore, StatRow, StatsParams};
+use super::{
+    period_to_days, DbError, FacetsResponse, ListFilters, ListResponse, LogRecord, LogStore,
+    StatRow, StatsParams,
+};
 #[cfg(feature = "sqlite")]
 use chrono::{DateTime, Utc};
 #[cfg(feature = "sqlite")]
@@ -168,7 +171,9 @@ impl SqliteStore {
             .await?;
 
         // Enable foreign key support for cascade deletes.
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&pool)
+            .await?;
 
         sqlx::query(CREATE_TABLE).execute(&pool).await?;
 
@@ -377,7 +382,8 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
     }
     if let Some(ref topic) = filters.has_topic {
         conditions.push(
-            "EXISTS (SELECT 1 FROM log_topics WHERE log_id = logs.id AND topic_name = ?)".to_string(),
+            "EXISTS (SELECT 1 FROM log_topics WHERE log_id = logs.id AND topic_name = ?)"
+                .to_string(),
         );
         bind_values.push(topic.clone());
     }
@@ -393,14 +399,14 @@ fn build_where_sqlite(filters: &ListFilters) -> (String, Vec<String>) {
         }
     }
     if let Some(ref tag) = filters.tag {
-        conditions.push(
-            "EXISTS (SELECT 1 FROM log_tags WHERE log_id = logs.id AND tag = ?)".to_string(),
-        );
+        conditions
+            .push("EXISTS (SELECT 1 FROM log_tags WHERE log_id = logs.id AND tag = ?)".to_string());
         bind_values.push(tag.clone());
     }
     if let Some(ref err_msg) = filters.error_message {
         conditions.push(
-            "EXISTS (SELECT 1 FROM log_errors WHERE log_id = logs.id AND message LIKE ?)".to_string(),
+            "EXISTS (SELECT 1 FROM log_errors WHERE log_id = logs.id AND message LIKE ?)"
+                .to_string(),
         );
         bind_values.push(format!("%{}%", err_msg));
     }
@@ -567,19 +573,20 @@ impl LogStore for SqliteStore {
         data_query = data_query.bind(limit).bind(offset);
 
         let rows = data_query.fetch_all(&self.pool).await?;
-        let logs: Result<Vec<LogRecord>, sqlx::Error> =
-            rows.iter().map(row_to_record).collect();
+        let logs: Result<Vec<LogRecord>, sqlx::Error> = rows.iter().map(row_to_record).collect();
 
-        Ok(ListResponse {
-            logs: logs?,
-            total,
-        })
+        Ok(ListResponse { logs: logs?, total })
     }
 
     async fn facets(&self, filters: &ListFilters) -> Result<FacetsResponse, DbError> {
         let (where_clause, bind_values) = build_where_sqlite(filters);
 
-        let columns = ["ver_hw", "vehicle_type", "ver_sw_release_str", "vibration_status"];
+        let columns = [
+            "ver_hw",
+            "vehicle_type",
+            "ver_sw_release_str",
+            "vibration_status",
+        ];
         let mut results: Vec<Vec<String>> = Vec::new();
 
         for col in &columns {
@@ -593,7 +600,10 @@ impl LogStore for SqliteStore {
                 query = query.bind(v);
             }
             let rows = query.fetch_all(&self.pool).await?;
-            let vals: Vec<String> = rows.iter().filter_map(|r| r.try_get::<String, _>(col).ok()).collect();
+            let vals: Vec<String> = rows
+                .iter()
+                .filter_map(|r| r.try_get::<String, _>(col).ok())
+                .collect();
             results.push(vals);
         }
 
@@ -601,7 +611,9 @@ impl LogStore for SqliteStore {
         let tags_sql = if where_clause.is_empty() {
             "SELECT DISTINCT tags FROM logs WHERE tags IS NOT NULL AND tags != ''".to_string()
         } else {
-            format!("SELECT DISTINCT tags FROM logs {where_clause} AND tags IS NOT NULL AND tags != ''")
+            format!(
+                "SELECT DISTINCT tags FROM logs {where_clause} AND tags IS NOT NULL AND tags != ''"
+            )
         };
         let mut tags_query = sqlx::query(&tags_sql);
         for v in &bind_values {
@@ -706,10 +718,7 @@ impl LogStore for SqliteStore {
 
         // Period filter
         if let Some(days) = period_to_days(params.period.as_deref()) {
-            conditions.push(format!(
-                "created_at >= datetime('now', '-{} days')",
-                days
-            ));
+            conditions.push(format!("created_at >= datetime('now', '-{} days')", days));
         }
 
         // Optional filters
@@ -774,15 +783,21 @@ impl LogStore for SqliteStore {
         Ok(data)
     }
 
-    async fn insert_parameters(&self, log_id: Uuid, params: &[(String, f64)]) -> Result<(), DbError> {
+    async fn insert_parameters(
+        &self,
+        log_id: Uuid,
+        params: &[(String, f64)],
+    ) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         for (name, value) in params {
-            sqlx::query("INSERT OR REPLACE INTO log_parameters (log_id, name, value) VALUES (?, ?, ?)")
-                .bind(&id_str)
-                .bind(name)
-                .bind(value)
-                .execute(&self.pool)
-                .await?;
+            sqlx::query(
+                "INSERT OR REPLACE INTO log_parameters (log_id, name, value) VALUES (?, ?, ?)",
+            )
+            .bind(&id_str)
+            .bind(name)
+            .bind(value)
+            .execute(&self.pool)
+            .await?;
         }
         Ok(())
     }
@@ -812,21 +827,31 @@ impl LogStore for SqliteStore {
         Ok(())
     }
 
-    async fn insert_errors(&self, log_id: Uuid, errors: &[(String, String, Option<u64>)]) -> Result<(), DbError> {
+    async fn insert_errors(
+        &self,
+        log_id: Uuid,
+        errors: &[(String, String, Option<u64>)],
+    ) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         for (level, message, timestamp_us) in errors {
-            sqlx::query("INSERT INTO log_errors (log_id, level, message, timestamp_us) VALUES (?, ?, ?, ?)")
-                .bind(&id_str)
-                .bind(level)
-                .bind(message)
-                .bind(timestamp_us.map(|t| t as i64))
-                .execute(&self.pool)
-                .await?;
+            sqlx::query(
+                "INSERT INTO log_errors (log_id, level, message, timestamp_us) VALUES (?, ?, ?, ?)",
+            )
+            .bind(&id_str)
+            .bind(level)
+            .bind(message)
+            .bind(timestamp_us.map(|t| t as i64))
+            .execute(&self.pool)
+            .await?;
         }
         Ok(())
     }
 
-    async fn insert_field_stats(&self, log_id: Uuid, stats: &[super::FieldStatRecord]) -> Result<(), DbError> {
+    async fn insert_field_stats(
+        &self,
+        log_id: Uuid,
+        stats: &[super::FieldStatRecord],
+    ) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         for s in stats {
             sqlx::query(
@@ -846,7 +871,11 @@ impl LogStore for SqliteStore {
         Ok(())
     }
 
-    async fn insert_diagnostics(&self, log_id: Uuid, diagnostics: &[super::DiagnosticRecord]) -> Result<(), DbError> {
+    async fn insert_diagnostics(
+        &self,
+        log_id: Uuid,
+        diagnostics: &[super::DiagnosticRecord],
+    ) -> Result<(), DbError> {
         let id_str = log_id.to_string();
         for d in diagnostics {
             sqlx::query(
@@ -868,12 +897,30 @@ impl LogStore for SqliteStore {
 
     async fn delete_junction_data(&self, log_id: Uuid) -> Result<(), DbError> {
         let id_str = log_id.to_string();
-        sqlx::query("DELETE FROM log_parameters WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_topics WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_tags WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_errors WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_field_stats WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
-        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = ?").bind(&id_str).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM log_parameters WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_topics WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_tags WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_errors WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_field_stats WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM log_diagnostics WHERE log_id = ?")
+            .bind(&id_str)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }
@@ -908,49 +955,80 @@ impl super::LogStore for SqliteStore {
         )))
     }
 
-    async fn update(&self, _id: uuid::Uuid, _record: &super::LogRecord) -> Result<(), super::DbError> {
+    async fn update(
+        &self,
+        _id: uuid::Uuid,
+        _record: &super::LogRecord,
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn stats(&self, _params: &super::StatsParams) -> Result<Vec<super::StatRow>, super::DbError> {
+    async fn stats(
+        &self,
+        _params: &super::StatsParams,
+    ) -> Result<Vec<super::StatRow>, super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_parameters(&self, _log_id: uuid::Uuid, _params: &[(String, f64)]) -> Result<(), super::DbError> {
+    async fn insert_parameters(
+        &self,
+        _log_id: uuid::Uuid,
+        _params: &[(String, f64)],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_topics(&self, _log_id: uuid::Uuid, _topics: &[(String, i32)]) -> Result<(), super::DbError> {
+    async fn insert_topics(
+        &self,
+        _log_id: uuid::Uuid,
+        _topics: &[(String, i32)],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_tags(&self, _log_id: uuid::Uuid, _tags: &[String]) -> Result<(), super::DbError> {
+    async fn insert_tags(
+        &self,
+        _log_id: uuid::Uuid,
+        _tags: &[String],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_errors(&self, _log_id: uuid::Uuid, _errors: &[(String, String, Option<u64>)]) -> Result<(), super::DbError> {
+    async fn insert_errors(
+        &self,
+        _log_id: uuid::Uuid,
+        _errors: &[(String, String, Option<u64>)],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_field_stats(&self, _log_id: uuid::Uuid, _stats: &[super::FieldStatRecord]) -> Result<(), super::DbError> {
+    async fn insert_field_stats(
+        &self,
+        _log_id: uuid::Uuid,
+        _stats: &[super::FieldStatRecord],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
     }
 
-    async fn insert_diagnostics(&self, _log_id: uuid::Uuid, _diagnostics: &[super::DiagnosticRecord]) -> Result<(), super::DbError> {
+    async fn insert_diagnostics(
+        &self,
+        _log_id: uuid::Uuid,
+        _diagnostics: &[super::DiagnosticRecord],
+    ) -> Result<(), super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))
@@ -962,7 +1040,10 @@ impl super::LogStore for SqliteStore {
         )))
     }
 
-    async fn facets(&self, _filters: &super::ListFilters) -> Result<super::FacetsResponse, super::DbError> {
+    async fn facets(
+        &self,
+        _filters: &super::ListFilters,
+    ) -> Result<super::FacetsResponse, super::DbError> {
         Err(super::DbError::Sqlx(sqlx::Error::Configuration(
             "sqlite feature is not enabled".into(),
         )))

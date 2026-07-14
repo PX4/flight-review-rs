@@ -136,7 +136,11 @@ fn analyze_axis(
     }
 
     let t_start = setpoint_raw[0].0.max(gyro_raw[0].0);
-    let t_end = setpoint_raw.last().unwrap().0.min(gyro_raw.last().unwrap().0);
+    let t_end = setpoint_raw
+        .last()
+        .unwrap()
+        .0
+        .min(gyro_raw.last().unwrap().0);
     if t_end - t_start < WINDOW_DURATION_S {
         return None;
     }
@@ -247,10 +251,7 @@ fn wiener_step_response(
     fft.process(&mut x);
     fft.process(&mut y);
 
-    let max_power = x
-        .iter()
-        .map(|c| c.norm_sqr())
-        .fold(0.0f64, |a, b| a.max(b));
+    let max_power = x.iter().map(|c| c.norm_sqr()).fold(0.0f64, |a, b| a.max(b));
     if max_power < 1e-30 {
         return None;
     }
@@ -324,10 +325,7 @@ fn build_histogram(
             let ti = ((t - time_min) / time_bin_width).floor() as isize;
             let ai = ((val - HIST_AMP_MIN) / amp_bin_width).floor() as isize;
 
-            if ti >= 0
-                && (ti as usize) < HIST_TIME_BINS
-                && ai >= 0
-                && (ai as usize) < HIST_AMP_BINS
+            if ti >= 0 && (ti as usize) < HIST_TIME_BINS && ai >= 0 && (ai as usize) < HIST_AMP_BINS
             {
                 counts[ti as usize * HIST_AMP_BINS + ai as usize] += 1;
             }

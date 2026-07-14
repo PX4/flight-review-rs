@@ -203,8 +203,10 @@ mod tests {
 
         // First: check local fixtures in the converter crate
         let local = std::path::Path::new(manifest)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // workspace root
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // workspace root
             .join("crates/converter/tests/fixtures")
             .join(name);
         if local.exists() {
@@ -213,9 +215,12 @@ mod tests {
 
         // Fallback: px4-ulog-rs repo (local dev)
         let external = std::path::Path::new(manifest)
-            .parent().unwrap()  // crates/
-            .parent().unwrap()  // workspace root
-            .parent().unwrap()  // ulog/
+            .parent()
+            .unwrap() // crates/
+            .parent()
+            .unwrap() // workspace root
+            .parent()
+            .unwrap() // ulog/
             .join("px4-ulog-rs/tests/fixtures")
             .join(name);
         external.to_string_lossy().to_string()
@@ -237,13 +242,11 @@ mod tests {
         // Should detect vehicle type from MAV_TYPE param
         assert!(fields.vehicle_type.is_some());
         // Should have GPS in localization
-        assert!(
-            fields
-                .localization_sources
-                .as_ref()
-                .unwrap()
-                .contains("GPS")
-        );
+        assert!(fields
+            .localization_sources
+            .as_ref()
+            .unwrap()
+            .contains("GPS"));
         // Should have vibration status
         assert!(fields.vibration_status.is_some());
         // Should have error/warning counts
