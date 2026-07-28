@@ -223,6 +223,12 @@ export interface PlotConfig {
   minimized?: boolean;
   /** Plot rendering kind. 'timeseries' (default) plots fields vs time;
    *  'xy' is a special trajectory/scatter plot with hardcoded topics;
-   *  'spectrogram' is a PSD heatmap with hardcoded topics. */
-  kind?: 'timeseries' | 'xy' | 'spectrogram';
+   *  'spectrogram' is a PSD heatmap with hardcoded topics;
+   *  'sql' runs raw DuckDB SQL (see `sql`) and plots the result. */
+  kind?: 'timeseries' | 'xy' | 'spectrogram' | 'sql';
+  /** For kind === 'sql': the raw DuckDB SQL to execute. The result's
+   *  `timestamp` column (µs) is the x-axis; remaining numeric columns are
+   *  series. Topics are queryable by name
+   *  (e.g. `FROM read_parquet('sensor_mag')`). */
+  sql?: string;
 }

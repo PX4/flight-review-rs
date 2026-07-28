@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { getContext } from 'svelte';
 	import type { FlightMetadata, PlotConfig, TopicInfo } from '$lib/types';
-	import { activePlots, plottedFields, builderOpen } from '$lib/stores/logViewer';
+	import { activePlots, plottedFields, builderOpen, editSqlPlot } from '$lib/stores/logViewer';
 	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 
 	let { metadata } = $props<{ metadata: FlightMetadata }>();
@@ -10,6 +10,75 @@
 
 	let searchQuery = $state('');
 	let expandedTopics = $state<Set<string>>(new Set());
+
+	// Raw SQL plot editor
+	const DEFAULT_SQL_LABEL = 'Custom SQL';
+	let sqlOpen = $state(false);
+	let sqlText = $state('');
+	let sqlName = $state('');
+	let sqlCounter = $state(0);
+	// Id of the SQL plot currently being edited (null = creating a new one).
+	let editingId = $state<string | null>(null);
+
+	// When another component requests editing a SQL plot, load it into the editor.
+	$effect(() => {
+		const target = $editSqlPlot;
+		if (!target) return;
+		editingId = target.id;
+		sqlText = target.sql ?? '';
+		sqlName = target.yLabel && target.yLabel !== DEFAULT_SQL_LABEL ? target.yLabel : '';
+		sqlOpen = true;
+		builderOpen.set(true);
+		editSqlPlot.set(null); // consume the request
+	});
+
+	function cancelEdit() {
+		editingId = null;
+		sqlText = '';
+		sqlName = '';
+	}
+
+	function insertSqlExample() {
+		const names = Object.keys(metadata.topics).sort((a, b) => a.localeCompare(b));
+		const topic = names.find((t) => /sensor_mag|sensor_accel|sensor_gyro/.test(t)) ?? names[0] ?? 'sensor_mag';
+		const multiId = metadata.topics[topic]?.multi_id ?? 0;
+		const file = multiId > 0 ? `${topic}_${multiId}` : topic;
+		sqlName = topic;
+		sqlText =
+			`SELECT timestamp, x, y, z\n` +
+			`FROM read_parquet('${file}')\n` +
+			`ORDER BY timestamp`;
+	}
+
+	function submitSqlPlot() {
+		const sql = sqlText.trim();
+		if (!sql) return;
+		const yLabel = sqlName.trim() || DEFAULT_SQL_LABEL;
+
+		if (editingId) {
+			// Update in place and stay in edit mode (populated editor) so further
+			// tweaks re-update the same plot; Cancel exits.
+			const id = editingId;
+			activePlots.update((plots) =>
+				plots.map((p) => (p.id === id ? { ...p, sql, yLabel } : p))
+			);
+		} else {
+			sqlCounter += 1;
+			const newPlot: PlotConfig = {
+				id: `sql_${Date.now()}_${sqlCounter}`,
+				topic: '',
+				multiId: 0,
+				fields: [],
+				yLabel,
+				colors: [],
+				kind: 'sql',
+				sql,
+			};
+			activePlots.update((plots) => [newPlot, ...plots]);
+			sqlText = '';
+			sqlName = '';
+		}
+	}
 
 	let topicFields = $state<Map<string, { name: string; type: string }[]>>(new Map());
 	let loadingTopics = $state<Set<string>>(new Set());
@@ -153,6 +222,69 @@
 
 			<!-- Content -->
 			<div class="flex-1 overflow-y-auto px-4 py-4">
+				<!-- Custom SQL plot -->
+				<div class="mb-4 rounded-md ring-1 ring-gray-200">
+					<button
+						type="button"
+						class="flex w-full items-center gap-2 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+						onclick={() => (sqlOpen = !sqlOpen)}
+						aria-expanded={sqlOpen}
+					>
+						<svg class="size-4 text-gray-400 transition-transform {sqlOpen ? 'rotate-90' : ''}" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+							<path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+						</svg>
+						Custom SQL plot
+						<span class="ml-auto text-[10px] font-medium text-indigo-500 bg-indigo-50 rounded px-1.5 py-0.5">DuckDB</span>
+					</button>
+					{#if sqlOpen}
+						<div class="border-t border-gray-100 px-3 py-3 space-y-2">
+							<input
+								type="text"
+								placeholder="Plot name (optional)"
+								bind:value={sqlName}
+								class="block w-full rounded-md bg-white px-2 py-1 text-xs text-gray-900 placeholder:text-gray-400 ring-1 ring-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none"
+							/>
+							<textarea
+								bind:value={sqlText}
+								rows="7"
+								spellcheck="false"
+								placeholder="SELECT timestamp, x, y, z FROM read_parquet('sensor_mag') ORDER BY timestamp"
+								class="block w-full rounded-md bg-gray-50 px-2 py-1.5 font-mono text-[11px] leading-snug text-gray-900 placeholder:text-gray-400 ring-1 ring-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none resize-y"
+							></textarea>
+							<div class="flex items-center gap-2">
+								<button
+									type="button"
+									class="rounded-md bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-500 disabled:opacity-40"
+									onclick={submitSqlPlot}
+									disabled={!sqlText.trim()}
+								>
+									{editingId ? 'Update plot' : 'Add plot'}
+								</button>
+								{#if editingId}
+									<button
+										type="button"
+										class="rounded-md px-2 py-1 text-xs font-medium text-gray-600 hover:text-gray-800"
+										onclick={cancelEdit}
+									>
+										Cancel
+									</button>
+								{:else}
+									<button
+										type="button"
+										class="rounded-md px-2 py-1 text-xs font-medium text-indigo-600 hover:text-indigo-500"
+										onclick={insertSqlExample}
+									>
+										Insert example
+									</button>
+								{/if}
+							</div>
+							<p class="text-[11px] leading-snug text-gray-500">
+								Name the time column exactly <code class="text-gray-700">timestamp</code> to get the shared seconds x-axis (synced with other plots) — don't alias it. Other numeric columns become series; a query with no <code class="text-gray-700">timestamp</code> uses its first column as a plain, independent x. Topics are Parquet files by name: <code class="text-gray-700">FROM read_parquet('sensor_mag')</code> (or <code class="text-gray-700">'sensor_mag.parquet'</code>; instance 1 is <code class="text-gray-700">'sensor_accel_1'</code>). In window frames, order by <code class="text-gray-700">CAST(timestamp AS BIGINT)</code> — raw timestamps are unsigned.
+							</p>
+						</div>
+					{/if}
+				</div>
+
 				<!-- Search -->
 				<div class="mb-4">
 					<input
