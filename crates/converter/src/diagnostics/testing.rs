@@ -25,18 +25,20 @@
 //!
 //! ## Required test categories for every analyzer
 //!
-//! 1. **No false positives** — `assert_no_false_positives("sample.ulg", "<id>")`
+//! 1. **No false positives** — topic-present, valid healthy telemetry (including
+//!    armed state where applicable), not merely an empty result on sample.ulg
 //! 2. **Detection** — synthetic bad data via `MessageBuilder` for each failure mode
 //! 3. **Missing fields** — messages with missing fields must not panic
 //! 4. **Deduplication** — same failure doesn't fire repeatedly
 //! 5. **Snapshot** — `insta::assert_json_snapshot!` for CI diffing
-//! 6. **Real-world fixture** — a `.ulg` file in `tests/fixtures/` that exhibits
-//!    the failure mode, with a test that asserts detection fires. Name it after
-//!    the analyzer (e.g. `motor_failure.ulg`). Use `ulog-convert scan` against
-//!    a corpus to find candidate files. Without a real fixture, the analyzer
-//!    is untested against actual PX4 telemetry and will not be accepted.
+//! 6. **Real-world fixture** — independently verify field types, validity,
+//!    instances and event times before asserting detection. A scan finds
+//!    candidates, not ground truth. Document missing positive fixtures with
+//!    SKIP_FIXTURE, or NEGATIVE_FIXTURE when a historical candidate is actually
+//!    a false-positive regression. Never fabricate positive ground truth.
 
 use super::Diagnostic;
+mod regressions;
 use px4_ulog::stream_parser::model::{
     DataMessage, FlattenedField, FlattenedFieldType, FlattenedFormat, MultiId,
 };
@@ -115,6 +117,17 @@ impl MessageBuilder {
         self
     }
 
+    pub fn field_bool(mut self, name: &str, value: bool) -> Self {
+        self.fields.push(FlattenedField {
+            flattened_field_name: name.to_string(),
+            field_type: FlattenedFieldType::Bool,
+            offset: self.offset,
+        });
+        self.data.push(u8::from(value));
+        self.offset += 1;
+        self
+    }
+
     /// Append a u16 field.
     pub fn field_u16(mut self, name: &str, value: u16) -> Self {
         self.fields.push(FlattenedField {
@@ -183,6 +196,19 @@ pub fn make_data_message<'a>(format: &'a FlattenedFormat, data: &'a [u8]) -> Dat
     }
 }
 
+pub fn feed(analyzer: &mut dyn super::Analyzer, builder: MessageBuilder, instance: u8) {
+    let (format, bytes) = builder.build();
+    let mut data = make_data_message(&format, &bytes);
+    data.multi_id = MultiId::new(instance);
+    analyzer.on_message(&data);
+}
+
+pub fn analyzer(id: &str) -> Box<dyn super::Analyzer> {
+    super::create_analyzers_filtered(&[id.to_string()])
+        .unwrap()
+        .remove(0)
+}
+
 /// Resolve a test fixture path by name from the converter crate's fixtures.
 pub fn fixture_path(name: &str) -> String {
     let manifest = env!("CARGO_MANIFEST_DIR");
@@ -232,35 +258,23 @@ pub fn assert_no_false_positives(fixture: &str, diagnostic_id: &str) {
     );
 }
 
-/// Assert descriptor field names == evidence JSON keys (minus "type" tag)
-/// for every analyzer with a `{id}.ulg` fixture.
+/// Verify every analyzer against a nonempty, schema-realistic synthetic
+/// detection. Negative fixtures and missing positive fixtures cannot skip this.
 #[test]
 fn descriptor_fields_match_evidence_keys() {
     use std::collections::BTreeSet;
 
     let analyzers = super::create_analyzers();
     let mut tested = Vec::new();
-    let mut skipped = Vec::new();
 
     for analyzer in analyzers {
         let id = analyzer.id().to_string();
         let descriptor = analyzer.output_descriptor();
 
-        // Discover fixture by convention
-        let fixture_name = format!("{}.ulg", id);
-        let fixture_file = fixture_path(&fixture_name);
-        if !std::path::Path::new(&fixture_file).exists() {
-            skipped.push(id);
-            continue;
-        }
-
-        let diags = analyze_fixture_for(&fixture_name, &id);
+        let diags = regressions::positive_case(&id);
         assert!(
             !diags.is_empty(),
-            "analyzer '{}' produced no diagnostics from fixture '{}' — \
-             can't verify descriptor parity",
-            id,
-            fixture_name,
+            "analyzer '{id}' produced no diagnostics from its positive control",
         );
 
         let descriptor_names: BTreeSet<String> =
@@ -302,18 +316,5 @@ fn descriptor_fields_match_evidence_keys() {
         tested.push(id);
     }
 
-    // Ensure we actually tested something — if all analyzers are skipped,
-    // this test is vacuous and should fail loudly.
-    assert!(
-        !tested.is_empty(),
-        "no analyzers were tested — all skipped: {:?}",
-        skipped,
-    );
-
-    if !skipped.is_empty() {
-        eprintln!(
-            "NOTE: skipped descriptor parity check for analyzers without fixtures: {:?}",
-            skipped,
-        );
-    }
+    assert_eq!(tested.len(), super::create_analyzers().len());
 }

@@ -1,15 +1,15 @@
 //! RC signal loss detection analyzer.
 //!
 //! Detects loss of RC (remote control) signal during armed flight.
-//! Tracks the `rc_lost` field from `input_rc` and the armed state from
-//! `vehicle_status`.
+//! Tracks receiver loss/failsafe flags from `input_rc` while armed. This
+//! describes the receiver input, not whether another control link is available.
 //!
 //! SKIP_FIXTURE: No known ULog in our corpus exhibits RC signal loss.
 //! Add a fixture when one becomes available.
 
 use super::{
-    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
-    PlotAnchor, Severity,
+    parse_bool, parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit,
+    OutputDescriptor, PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
 
@@ -23,6 +23,8 @@ pub struct RcLossAnalyzer {
     rc_lost: bool,
     loss_start_us: Option<u64>,
     last_signal_us: u64,
+    last_timestamp_us: u64,
+    last_input_us: Option<u64>,
     detections: Vec<Diagnostic>,
 }
 
@@ -39,6 +41,8 @@ impl RcLossAnalyzer {
             rc_lost: false,
             loss_start_us: None,
             last_signal_us: 0,
+            last_timestamp_us: 0,
+            last_input_us: None,
             detections: Vec::new(),
         }
     }
@@ -59,7 +63,7 @@ impl RcLossAnalyzer {
         self.detections.push(Diagnostic {
             id: "rc_loss".to_string(),
             summary: format!(
-                "RC signal lost for {:.1}s starting at {:.1}s while armed",
+                "RC input reported loss or failsafe for {:.1}s starting at {:.1}s while armed",
                 duration_us as f64 / 1_000_000.0,
                 start_us as f64 / 1_000_000.0,
             ),
@@ -99,6 +103,7 @@ impl Analyzer for RcLossAnalyzer {
             .as_ref()
             .map(|tf| tf.parse_timestamp(data.data))
             .unwrap_or(0);
+        self.last_timestamp_us = self.last_timestamp_us.max(ts);
 
         match topic {
             "vehicle_status" => {
@@ -115,9 +120,23 @@ impl Analyzer for RcLossAnalyzer {
                 }
             }
             "input_rc" => {
-                let lost = parse_field::<u8>(data, "rc_lost")
-                    .map(|v| v != 0)
-                    .unwrap_or(false);
+                if self.last_input_us.is_some_and(|previous| ts <= previous) {
+                    return;
+                }
+                let (lost_flag, failsafe) =
+                    (parse_bool(data, "rc_lost"), parse_bool(data, "rc_failsafe"));
+                if lost_flag.is_none() && failsafe.is_none() {
+                    return;
+                }
+                self.last_input_us = Some(ts);
+                let lost = lost_flag == Some(true) || failsafe == Some(true);
+                if let Some(last_signal) = parse_field::<u64>(data, "timestamp_last_signal")
+                    .filter(|_| !self.rc_lost && lost)
+                {
+                    if last_signal <= ts {
+                        self.last_signal_us = self.last_signal_us.max(last_signal);
+                    }
+                }
 
                 if lost && self.armed && !self.rc_lost {
                     // RC just lost while armed
@@ -134,7 +153,9 @@ impl Analyzer for RcLossAnalyzer {
                 }
 
                 if !lost {
-                    self.last_signal_us = ts;
+                    self.last_signal_us = parse_field::<u64>(data, "timestamp_last_signal")
+                        .filter(|value| *value <= ts)
+                        .unwrap_or(ts);
                 }
             }
             _ => {}
@@ -146,7 +167,7 @@ impl Analyzer for RcLossAnalyzer {
         if self.rc_lost && self.armed {
             if let Some(start) = self.loss_start_us.take() {
                 // Use last known timestamp as end
-                let end = self.last_signal_us.max(start);
+                let end = self.last_timestamp_us.max(start);
                 self.emit_loss(start, end);
             }
         }
@@ -185,7 +206,7 @@ mod tests {
         // RC signal present
         let (fmt2, data2) = MessageBuilder::new("input_rc")
             .timestamp(2_000_000)
-            .field_u8("rc_lost", 0)
+            .field_bool("rc_lost", false)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
@@ -193,7 +214,7 @@ mod tests {
         // RC lost
         let (fmt3, data3) = MessageBuilder::new("input_rc")
             .timestamp(3_000_000)
-            .field_u8("rc_lost", 1)
+            .field_bool("rc_lost", true)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
         analyzer.on_message(&dm3);
@@ -201,7 +222,7 @@ mod tests {
         // RC recovered after 2 seconds (> min threshold)
         let (fmt4, data4) = MessageBuilder::new("input_rc")
             .timestamp(5_000_000)
-            .field_u8("rc_lost", 0)
+            .field_bool("rc_lost", false)
             .build();
         let dm4 = make_data_message(&fmt4, &data4);
         analyzer.on_message(&dm4);
@@ -234,7 +255,7 @@ mod tests {
         // RC lost
         let (fmt2, data2) = MessageBuilder::new("input_rc")
             .timestamp(2_000_000)
-            .field_u8("rc_lost", 1)
+            .field_bool("rc_lost", true)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
@@ -242,7 +263,7 @@ mod tests {
         // RC recovered after 6 seconds
         let (fmt3, data3) = MessageBuilder::new("input_rc")
             .timestamp(8_000_000)
-            .field_u8("rc_lost", 0)
+            .field_bool("rc_lost", false)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
         analyzer.on_message(&dm3);
@@ -267,14 +288,14 @@ mod tests {
         // RC lost while disarmed
         let (fmt2, data2) = MessageBuilder::new("input_rc")
             .timestamp(2_000_000)
-            .field_u8("rc_lost", 1)
+            .field_bool("rc_lost", true)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
 
         let (fmt3, data3) = MessageBuilder::new("input_rc")
             .timestamp(10_000_000)
-            .field_u8("rc_lost", 0)
+            .field_bool("rc_lost", false)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
         analyzer.on_message(&dm3);
@@ -297,14 +318,14 @@ mod tests {
         // Very short RC loss (200ms, below 500ms threshold)
         let (fmt2, data2) = MessageBuilder::new("input_rc")
             .timestamp(2_000_000)
-            .field_u8("rc_lost", 1)
+            .field_bool("rc_lost", true)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
 
         let (fmt3, data3) = MessageBuilder::new("input_rc")
             .timestamp(2_200_000)
-            .field_u8("rc_lost", 0)
+            .field_bool("rc_lost", false)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
         analyzer.on_message(&dm3);

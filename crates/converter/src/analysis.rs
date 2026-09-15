@@ -8,7 +8,7 @@ use crate::metadata::{FlightMetadata, ParamValue};
 use px4_ulog::stream_parser::file_reader::{
     read_file_with_simple_callback, Message, SimpleCallbackResult,
 };
-use px4_ulog::stream_parser::model::FlattenedFieldType;
+use px4_ulog::stream_parser::model::{DataMessage, FlattenedFieldType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -23,7 +23,7 @@ pub struct FlightAnalysis {
     pub vibration: VibrationSummary,
     pub non_default_params: Vec<ParamDiff>,
     pub gps_track: Vec<TrackPoint>,
-    /// Per-topic-field statistics (min, max, mean)
+    /// Per-topic-field statistics (min, max, mean), using ULog instance zero only.
     pub field_stats: Vec<FieldStat>,
     /// Diagnostic anomalies detected during analysis.
     #[serde(default)]
@@ -58,7 +58,10 @@ pub struct VtolStateSegment {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct FlightStats {
+    /// Recorded path length from valid components of instance-zero local position.
+    /// Invalid intervals and estimator reset boundaries are not bridged.
     pub total_distance_m: f64,
+    /// Largest valid vertical span within a continuous estimator coordinate frame.
     pub max_altitude_diff_m: f64,
     pub max_speed_m_s: f64,
     pub max_horizontal_speed_m_s: f64,
@@ -273,12 +276,124 @@ fn vtol_state_name(vehicle_type: u8, in_transition: bool) -> &'static str {
     }
 }
 
+fn bool_field(data: &DataMessage<'_>, name: &str) -> Option<bool> {
+    crate::diagnostics::parse_bool(data, name)
+}
+
+fn component_valid(data: &DataMessage<'_>, name: &str) -> bool {
+    // Schemas predating validity flags remain usable. A present but unsupported
+    // flag type is not evidence that a component is valid.
+    if data
+        .flattened_format
+        .field_iter()
+        .any(|f| f.flattened_field_name == name)
+    {
+        bool_field(data, name).unwrap_or(false)
+    } else {
+        true
+    }
+}
+
+#[derive(Default)]
+struct PositionStats {
+    prev_xy: Option<(f64, f64)>,
+    prev_z: Option<f64>,
+    xy_reset: Option<u8>,
+    z_reset: Option<u8>,
+    last_ts: Option<u64>,
+    z_range: Option<(f64, f64)>,
+    distance: f64,
+    altitude_span: f64,
+    speed_max: f64,
+    horizontal_max: f64,
+    up_max: f64,
+    down_max: f64,
+    speed_sum: f64,
+    speed_count: u64,
+}
+
+impl PositionStats {
+    fn update(&mut self, data: &DataMessage<'_>, ts: Option<u64>) {
+        let Some(ts) = ts else { return };
+        if self.last_ts.is_some_and(|last| ts <= last) {
+            return;
+        }
+        self.last_ts = Some(ts);
+        let value = |name| {
+            data.flattened_format
+                .get_field_parser::<f32>(name)
+                .ok()
+                .map(|p| f64::from(p.parse(data.data)))
+                .filter(|v| v.is_finite())
+        };
+        let counter = |name| {
+            data.flattened_format
+                .get_field_parser::<u8>(name)
+                .ok()
+                .map(|p| p.parse(data.data))
+        };
+        let xy_reset = counter("xy_reset_counter");
+        let z_reset = counter("z_reset_counter");
+        if self.xy_reset != xy_reset {
+            self.prev_xy = None;
+        }
+        if self.z_reset != z_reset {
+            self.prev_z = None;
+            self.z_range = None;
+        }
+        self.xy_reset = xy_reset;
+        self.z_reset = z_reset;
+
+        let xy = value("x")
+            .zip(value("y"))
+            .filter(|_| component_valid(data, "xy_valid"));
+        let z = value("z").filter(|_| component_valid(data, "z_valid"));
+        let horizontal_distance_sq = xy
+            .zip(self.prev_xy)
+            .map(|((x, y), (px, py))| (x - px).powi(2) + (y - py).powi(2));
+        let vertical_distance_sq = z.zip(self.prev_z).map(|(z, pz)| (z - pz).powi(2));
+        self.distance +=
+            (horizontal_distance_sq.unwrap_or(0.0) + vertical_distance_sq.unwrap_or(0.0)).sqrt();
+        self.prev_xy = xy;
+        self.prev_z = z;
+        if let Some(z) = z {
+            let (min, max) = self.z_range.get_or_insert((z, z));
+            *min = min.min(z);
+            *max = max.max(z);
+            self.altitude_span = self.altitude_span.max(*max - *min);
+        } else {
+            self.z_range = None;
+        }
+
+        let horizontal = value("vx")
+            .zip(value("vy"))
+            .filter(|_| component_valid(data, "v_xy_valid"))
+            .map(|(vx, vy)| vx.hypot(vy));
+        let vertical = value("vz").filter(|_| component_valid(data, "v_z_valid"));
+        if let Some(speed) = horizontal {
+            self.horizontal_max = self.horizontal_max.max(speed);
+        }
+        if let Some(vz) = vertical {
+            self.up_max = self.up_max.max(-vz);
+            self.down_max = self.down_max.max(vz);
+        }
+        if let (Some(horizontal), Some(vertical)) = (horizontal, vertical) {
+            let speed = horizontal.hypot(vertical);
+            self.speed_max = self.speed_max.max(speed);
+            self.speed_sum += speed;
+            self.speed_count += 1;
+        }
+    }
+}
+
 /// Analyze a ULog file, extracting flight statistics, mode timeline, battery
 /// summary, GPS quality, vibration data, and GPS track.
 ///
 /// This performs a second streaming pass through the file (the first pass is
 /// done by `extract_metadata`). Missing topics are handled gracefully —
-/// the corresponding fields in the result will be empty/default.
+/// the corresponding fields in the result will be empty/default. General
+/// summaries select ULog instance zero rather than pooling independent sensors
+/// or estimator coordinate frames. Diagnostics still receive every instance.
 pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, std::io::Error> {
     let mut analysis = FlightAnalysis::default();
 
@@ -297,16 +412,9 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     let mut vtol_start_us: u64 = 0;
 
     // Local position stats
-    let mut prev_pos: Option<(f32, f32, f32)> = None;
-    let mut total_distance: f64 = 0.0;
-    let mut min_z: f32 = f32::MAX;
-    let mut max_z: f32 = f32::MIN;
-    let mut max_speed_3d: f32 = 0.0f32;
-    let mut max_speed_h: f32 = 0.0f32;
-    let mut max_speed_up: f32 = 0.0f32;
-    let mut max_speed_down: f32 = 0.0f32;
-    let mut speed_sum: f64 = 0.0;
-    let mut speed_count: u64 = 0;
+    let mut position = PositionStats::default();
+    let mut recorded_end_us: Option<u64> = None;
+    let mut last_status_us: Option<u64> = None;
 
     // Attitude / tilt
     let mut max_tilt_rad: f32 = 0.0f32;
@@ -352,7 +460,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
 
     // Per-field stats: topic -> Vec<RunningStats>
     // On first message for each topic, discover numeric fields and create RunningStats entries.
-    // Key is (message_name, msg_id) to handle multi-instance topics.
+    // Only instance zero contributes to these summaries.
     let mut field_stats_map: HashMap<String, Vec<RunningStats>> = HashMap::new();
     let mut topics_initialized: HashMap<String, bool> = HashMap::new();
 
@@ -364,6 +472,21 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                 .timestamp_field
                 .as_ref()
                 .map(|tf| tf.parse_timestamp(data.data));
+
+            if let Some(ts) = ts {
+                recorded_end_us = Some(recorded_end_us.unwrap_or(ts).max(ts));
+            }
+            // Dispatch before selecting the instance used by general summaries.
+            if diagnostic_topics.contains(topic) {
+                for analyzer in analyzers.iter_mut() {
+                    if analyzer.required_topics().contains(&topic) {
+                        analyzer.on_message(data);
+                    }
+                }
+            }
+            if data.multi_id.value() != 0 {
+                return SimpleCallbackResult::KeepReading;
+            }
 
             // --- Per-field stats tracking (all topics) ---
             if !topics_initialized.contains_key(topic) {
@@ -401,6 +524,10 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
             match topic {
                 "vehicle_status" => {
                     if let Some(ts) = ts {
+                        if last_status_us.is_some_and(|last| ts <= last) {
+                            return SimpleCallbackResult::KeepReading;
+                        }
+                        last_status_us = Some(ts);
                         // nav_state
                         if let Ok(parser) =
                             data.flattened_format.get_field_parser::<u8>("nav_state")
@@ -430,11 +557,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                             .ok()
                             .map(|p| p.parse(data.data));
                         // in_transition_mode can be bool or uint8
-                        let in_trans = data
-                            .flattened_format
-                            .get_field_parser::<u8>("in_transition_mode")
-                            .ok()
-                            .map(|p| p.parse(data.data) != 0);
+                        let in_trans = bool_field(data, "in_transition_mode");
 
                         if let (Some(vt_val), Some(it_val)) = (vt, in_trans) {
                             let changed = current_vehicle_type != Some(vt_val)
@@ -458,63 +581,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                 }
 
                 "vehicle_local_position" => {
-                    if let (Ok(x_p), Ok(y_p), Ok(z_p), Ok(vx_p), Ok(vy_p), Ok(vz_p)) = (
-                        data.flattened_format.get_field_parser::<f32>("x"),
-                        data.flattened_format.get_field_parser::<f32>("y"),
-                        data.flattened_format.get_field_parser::<f32>("z"),
-                        data.flattened_format.get_field_parser::<f32>("vx"),
-                        data.flattened_format.get_field_parser::<f32>("vy"),
-                        data.flattened_format.get_field_parser::<f32>("vz"),
-                    ) {
-                        let x = x_p.parse(data.data);
-                        let y = y_p.parse(data.data);
-                        let z = z_p.parse(data.data);
-                        let vx = vx_p.parse(data.data);
-                        let vy = vy_p.parse(data.data);
-                        let vz = vz_p.parse(data.data);
-
-                        // Skip NaN values
-                        if x.is_finite() && y.is_finite() && z.is_finite() {
-                            // Distance accumulation
-                            if let Some((px, py, pz)) = prev_pos {
-                                let dx = (x - px) as f64;
-                                let dy = (y - py) as f64;
-                                let dz = (z - pz) as f64;
-                                total_distance += (dx * dx + dy * dy + dz * dz).sqrt();
-                            }
-                            prev_pos = Some((x, y, z));
-
-                            // Altitude tracking (NED: z negative = up)
-                            if z < min_z {
-                                min_z = z;
-                            }
-                            if z > max_z {
-                                max_z = z;
-                            }
-                        }
-
-                        if vx.is_finite() && vy.is_finite() && vz.is_finite() {
-                            let speed_3d = ((vx * vx + vy * vy + vz * vz) as f64).sqrt() as f32;
-                            let speed_h = ((vx * vx + vy * vy) as f64).sqrt() as f32;
-
-                            if speed_3d > max_speed_3d {
-                                max_speed_3d = speed_3d;
-                            }
-                            if speed_h > max_speed_h {
-                                max_speed_h = speed_h;
-                            }
-                            // NED: negative vz = up
-                            if -vz > max_speed_up {
-                                max_speed_up = -vz;
-                            }
-                            if vz > max_speed_down {
-                                max_speed_down = vz;
-                            }
-
-                            speed_sum += speed_3d as f64;
-                            speed_count += 1;
-                        }
-                    }
+                    position.update(data, ts);
                 }
 
                 "vehicle_attitude" => {
@@ -674,7 +741,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
 
                         // GPS track — downsample to ~1 Hz, only 3D fix or better
                         let ft = fix_type.unwrap_or(0);
-                        if ft > 2 && (ts - last_track_ts) >= 1_000_000 {
+                        if ft > 2 && ts.saturating_sub(last_track_ts) >= 1_000_000 {
                             // Try new field names (f64 degrees) first, fall back to legacy (i32 raw)
                             let coords: Option<(f64, f64, f64)> =
                                 if let (Ok(lat_p), Ok(lon_p), Ok(alt_p)) = (
@@ -703,7 +770,13 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
                                 };
 
                             if let Some((lat_deg, lon_deg, alt_m)) = coords {
-                                if lat_deg != 0.0 || lon_deg != 0.0 {
+                                if lat_deg.is_finite()
+                                    && lon_deg.is_finite()
+                                    && alt_m.is_finite()
+                                    && lat_deg.abs() <= 90.0
+                                    && lon_deg.abs() <= 180.0
+                                    && (lat_deg != 0.0 || lon_deg != 0.0)
+                                {
                                     // Find current mode from mode_changes
                                     let mode_id = mode_changes
                                         .iter()
@@ -744,15 +817,6 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
 
                 _ => {}
             }
-
-            // Dispatch to diagnostic analyzers
-            if diagnostic_topics.contains(topic) {
-                for analyzer in analyzers.iter_mut() {
-                    if analyzer.required_topics().contains(&topic) {
-                        analyzer.on_message(data);
-                    }
-                }
-            }
         }
         SimpleCallbackResult::KeepReading
     })?;
@@ -760,16 +824,8 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     // --- Finalize flight modes ---
     // Close the last mode segment using the last known timestamp
     if let Some(nav) = current_nav_state {
-        // Use flight_duration_s from metadata to estimate the last timestamp
-        let last_ts = metadata
-            .flight_duration_s
-            .map(|d| metadata.start_timestamp_us + (d * 1_000_000.0) as u64)
-            .unwrap_or(mode_start_us);
-        let end_us = if last_ts > mode_start_us {
-            last_ts
-        } else {
-            mode_start_us
-        };
+        // Header time and first-data time are not interchangeable origins.
+        let end_us = recorded_end_us.unwrap_or(mode_start_us);
         analysis.flight_modes.push(FlightModeSegment {
             mode: nav_state_name(nav).to_string(),
             mode_id: nav,
@@ -782,15 +838,7 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     // Close last VTOL segment
     if let Some(vt) = current_vehicle_type {
         let it = current_in_transition.unwrap_or(false);
-        let last_ts = metadata
-            .flight_duration_s
-            .map(|d| metadata.start_timestamp_us + (d * 1_000_000.0) as u64)
-            .unwrap_or(vtol_start_us);
-        let end_us = if last_ts > vtol_start_us {
-            last_ts
-        } else {
-            vtol_start_us
-        };
+        let end_us = recorded_end_us.unwrap_or(vtol_start_us);
         analysis.vtol_states.push(VtolStateSegment {
             state: vtol_state_name(vt, it).to_string(),
             start_us: vtol_start_us,
@@ -799,16 +847,14 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     }
 
     // --- Finalize flight stats ---
-    analysis.stats.total_distance_m = total_distance;
-    if min_z < f32::MAX && max_z > f32::MIN {
-        analysis.stats.max_altitude_diff_m = (max_z - min_z).abs() as f64;
-    }
-    analysis.stats.max_speed_m_s = max_speed_3d as f64;
-    analysis.stats.max_horizontal_speed_m_s = max_speed_h as f64;
-    analysis.stats.max_speed_up_m_s = max_speed_up.max(0.0) as f64;
-    analysis.stats.max_speed_down_m_s = max_speed_down.max(0.0) as f64;
-    if speed_count > 0 {
-        analysis.stats.avg_speed_m_s = speed_sum / speed_count as f64;
+    analysis.stats.total_distance_m = position.distance;
+    analysis.stats.max_altitude_diff_m = position.altitude_span;
+    analysis.stats.max_speed_m_s = position.speed_max;
+    analysis.stats.max_horizontal_speed_m_s = position.horizontal_max;
+    analysis.stats.max_speed_up_m_s = position.up_max;
+    analysis.stats.max_speed_down_m_s = position.down_max;
+    if position.speed_count > 0 {
+        analysis.stats.avg_speed_m_s = position.speed_sum / position.speed_count as f64;
     }
     analysis.stats.max_tilt_deg = max_tilt_rad.to_degrees() as f64;
     analysis.stats.max_rotation_speed_deg_s = max_rotation_speed_rad_s.to_degrees() as f64;
@@ -933,7 +979,46 @@ fn compute_non_default_params(metadata: &FlightMetadata, analysis: &mut FlightAn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diagnostics::testing::{make_data_message, MessageBuilder};
     use crate::metadata::extract_metadata;
+
+    fn synthetic_analysis(
+        header_us: u64,
+        formats: &[&str],
+        subscriptions: &[(u16, u8, &str)],
+        records: &[(u16, Vec<u8>)],
+    ) -> FlightAnalysis {
+        fn message(bytes: &mut Vec<u8>, kind: u8, payload: &[u8]) {
+            bytes.extend_from_slice(&(payload.len() as u16).to_le_bytes());
+            bytes.push(kind);
+            bytes.extend_from_slice(payload);
+        }
+        let target = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target");
+        std::fs::create_dir_all(&target).unwrap();
+        let dir = tempfile::tempdir_in(target).unwrap();
+        let path = dir.path().join("general-analysis.ulg");
+        let mut bytes = b"ULog\x01\x12\x35\x01".to_vec();
+        bytes.extend_from_slice(&header_us.to_le_bytes());
+        message(&mut bytes, b'B', &[0; 40]);
+        for format in formats {
+            message(&mut bytes, b'F', format.as_bytes());
+        }
+        for (id, instance, name) in subscriptions {
+            let mut payload = vec![*instance];
+            payload.extend_from_slice(&id.to_le_bytes());
+            payload.extend_from_slice(name.as_bytes());
+            message(&mut bytes, b'A', &payload);
+        }
+        for (id, data) in records {
+            let mut payload = id.to_le_bytes().to_vec();
+            payload.extend_from_slice(data);
+            message(&mut bytes, b'D', &payload);
+        }
+        std::fs::write(&path, bytes).unwrap();
+        let path = path.to_str().unwrap();
+        let metadata = extract_metadata(path).unwrap();
+        analyze(path, &metadata).unwrap()
+    }
 
     fn px4_ulog_fixture(name: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
@@ -956,17 +1041,16 @@ mod tests {
 
         // Should have flight modes
         assert!(!analysis.flight_modes.is_empty());
-        // Should have stats
-        assert!(analysis.stats.max_speed_m_s >= 0.0);
+        // All 678 XY samples are invalid; Z is valid, so only vertical travel
+        // is retained and a three-dimensional speed cannot be reported.
+        assert!((analysis.stats.total_distance_m - 0.13642866164445877).abs() < 1e-9);
+        assert_eq!(analysis.stats.max_horizontal_speed_m_s, 0.0);
+        assert_eq!(analysis.stats.max_speed_m_s, 0.0);
     }
 
     #[test]
     fn test_analyze_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("Skipping: fixed_wing_gps.ulg not available");
-            return;
-        }
         let meta = extract_metadata(&path).unwrap();
         let analysis = analyze(&path, &meta).unwrap();
 
@@ -976,57 +1060,228 @@ mod tests {
         assert!(!analysis.flight_modes.is_empty());
         // Should have GPS quality data
         assert!(analysis.gps_quality.max_satellites.is_some());
+        assert_eq!(analysis.flight_modes.last().unwrap().end_us, 728_940_452);
+        assert!(
+            !analysis.vtol_states.is_empty(),
+            "PX4 transition flag is bool"
+        );
+        assert_eq!(analysis.vtol_states.last().unwrap().end_us, 728_940_452);
     }
 
     #[test]
     fn test_gps_track_new_field_names() {
-        // Test with any log that has vehicle_gps_position with latitude_deg/longitude_deg fields
-        // (current PX4 format). Falls back to quadrotor_local.ulg or any available fixture.
-        let candidates = ["quadrotor_gps.ulg", "fixed_wing_gps.ulg"];
-        let mut path = String::new();
-        for name in candidates {
-            let p = px4_ulog_fixture(name);
-            if std::path::Path::new(&p).exists() {
-                path = p;
-                break;
-            }
+        let records = [1_000_000, 2_000_000, 1_500_000, 3_000_000]
+            .into_iter()
+            .map(|ts| {
+                let (_, bytes) = MessageBuilder::new("vehicle_gps_position")
+                    .timestamp(ts)
+                    .field_f64("latitude_deg", 47.397742)
+                    .field_f64("longitude_deg", 8.545594)
+                    .field_f64("altitude_msl_m", 488.25)
+                    .field_u8("fix_type", 3)
+                    .field_u8("satellites_used", 12)
+                    .build();
+                (1, bytes)
+            })
+            .collect::<Vec<_>>();
+        let analysis = synthetic_analysis(
+            1,
+            &["vehicle_gps_position:uint64_t timestamp;double latitude_deg;double longitude_deg;double altitude_msl_m;uint8_t fix_type;uint8_t satellites_used;"],
+            &[(1, 0, "vehicle_gps_position")],
+            &records,
+        );
+        assert_eq!(analysis.gps_track.len(), 3);
+        for (i, pt) in analysis.gps_track.iter().enumerate() {
+            assert_eq!(pt.lat_deg, 47.397742);
+            assert_eq!(pt.lon_deg, 8.545594);
+            assert_eq!(pt.alt_m, 488.25);
+            assert_eq!(pt.timestamp_us, (i as u64 + 1) * 1_000_000);
         }
-        if path.is_empty() {
-            eprintln!("Skipping test_gps_track_new_field_names: no GPS fixture available");
-            return;
-        }
-        let meta = extract_metadata(&path).unwrap();
-        let analysis = analyze(&path, &meta).unwrap();
+    }
 
-        if !analysis.gps_track.is_empty() {
-            // Verify track points have valid coordinates
-            for pt in &analysis.gps_track {
-                assert!(
-                    pt.lat_deg.abs() <= 90.0,
-                    "latitude out of range: {}",
-                    pt.lat_deg
-                );
-                assert!(
-                    pt.lon_deg.abs() <= 180.0,
-                    "longitude out of range: {}",
-                    pt.lon_deg
-                );
-                assert!(
-                    pt.alt_m.abs() < 100_000.0,
-                    "altitude out of range: {}",
-                    pt.alt_m
-                );
-                assert!(pt.timestamp_us > 0, "timestamp should be positive");
+    #[test]
+    fn timelines_use_recorded_end_and_boolean_or_legacy_transition_flag() {
+        for flag_type in ["bool", "uint8_t"] {
+            let status = format!("vehicle_status:uint64_t timestamp;uint8_t nav_state;uint8_t vehicle_type;{flag_type} in_transition_mode;");
+            let mut records = Vec::new();
+            for (ts, nav, vt, transition) in [
+                (1_000_000_u64, 0, 1, 0),
+                (2_000_000, 3, 1, 1),
+                (1_500_000, 0, 1, 0), // stale status cannot reopen an earlier mode
+                (3_000_000, 3, 2, 0),
+            ] {
+                let mut bytes = ts.to_le_bytes().to_vec();
+                bytes.extend_from_slice(&[nav, vt, transition]);
+                records.push((1, bytes));
             }
+            records.push((2, 5_000_000_u64.to_le_bytes().to_vec()));
+            records.push((2, 4_000_000_u64.to_le_bytes().to_vec()));
+            let result = synthetic_analysis(
+                120_000_000,
+                &[&status, "other:uint64_t timestamp;"],
+                &[(1, 0, "vehicle_status"), (2, 1, "other")],
+                &records,
+            );
+            assert_eq!(result.flight_modes.len(), 2);
+            assert_eq!(result.flight_modes[0].duration_s, 1.0);
+            assert_eq!(result.flight_modes[1].duration_s, 3.0);
+            assert_eq!(result.flight_modes[1].end_us, 5_000_000);
+            assert_eq!(
+                result
+                    .vtol_states
+                    .iter()
+                    .map(|s| s.state.as_str())
+                    .collect::<Vec<_>>(),
+                ["MC", "Transition", "FW"]
+            );
+            assert_eq!(result.vtol_states[2].end_us, 5_000_000);
+        }
+    }
 
-            // Track should be roughly in chronological order
-            for window in analysis.gps_track.windows(2) {
-                assert!(
-                    window[1].timestamp_us >= window[0].timestamp_us,
-                    "GPS track should be chronologically ordered"
-                );
+    fn position_message(
+        ts: u64,
+        xyz: [f32; 3],
+        velocity: [f32; 3],
+        validity: Option<[u8; 4]>,
+        counters: [u8; 2],
+    ) -> (px4_ulog::stream_parser::model::FlattenedFormat, Vec<u8>) {
+        let mut message = MessageBuilder::new("vehicle_local_position")
+            .timestamp(ts)
+            .field_f32("x", xyz[0])
+            .field_f32("y", xyz[1])
+            .field_f32("z", xyz[2])
+            .field_f32("vx", velocity[0])
+            .field_f32("vy", velocity[1])
+            .field_f32("vz", velocity[2])
+            .field_u8("xy_reset_counter", counters[0])
+            .field_u8("z_reset_counter", counters[1]);
+        if let Some(validity) = validity {
+            for (field, valid) in ["xy_valid", "z_valid", "v_xy_valid", "v_z_valid"]
+                .into_iter()
+                .zip(validity)
+            {
+                message = message.field_u8(field, valid);
             }
         }
+        message.build()
+    }
+
+    #[test]
+    fn position_valid_components_and_legacy_schemas_preserve_motion() {
+        for validity in [None, Some([1; 4])] {
+            let mut stats = PositionStats::default();
+            for (ts, xyz) in [(1, [0.0; 3]), (2, [3.0, 4.0, -12.0])] {
+                let (format, bytes) =
+                    position_message(ts, xyz, [3.0, 4.0, -12.0], validity, [0; 2]);
+                stats.update(&make_data_message(&format, &bytes), Some(ts));
+            }
+            assert_eq!(stats.distance, 13.0);
+            assert_eq!(stats.altitude_span, 12.0);
+            assert_eq!(stats.horizontal_max, 5.0);
+            assert_eq!(stats.up_max, 12.0);
+            assert_eq!(stats.speed_max, 13.0);
+            assert_eq!(stats.speed_sum / stats.speed_count as f64, 13.0);
+        }
+        for (validity, expected_distance, horizontal, down) in [
+            ([1, 0, 1, 0], 5.0, 5.0, 0.0),
+            ([0, 1, 0, 1], 12.0, 0.0, 12.0),
+            ([0; 4], 0.0, 0.0, 0.0),
+            ([2; 4], 0.0, 0.0, 0.0), // invalid uint8 boolean encoding
+        ] {
+            let mut stats = PositionStats::default();
+            for (ts, xyz) in [(1, [0.0; 3]), (2, [3.0, 4.0, 12.0])] {
+                let (format, bytes) =
+                    position_message(ts, xyz, [3.0, 4.0, 12.0], Some(validity), [0; 2]);
+                stats.update(&make_data_message(&format, &bytes), Some(ts));
+            }
+            assert_eq!(stats.distance, expected_distance);
+            assert_eq!(stats.horizontal_max, horizontal);
+            assert_eq!(stats.down_max, down);
+            assert_eq!(
+                stats.speed_count, 0,
+                "3D speed requires both velocity components"
+            );
+        }
+    }
+
+    #[test]
+    fn position_invalid_intervals_and_resets_are_not_motion() {
+        let mut stats = PositionStats::default();
+        for (ts, x, z, validity, resets) in [
+            (1, 0.0, 0.0, [1; 4], [255; 2]),
+            (2, 100.0, 100.0, [1; 4], [0; 2]), // reset counters wrap
+            (3, 103.0, 104.0, [1; 4], [0; 2]), // real 5m movement
+            (4, 1000.0, 1000.0, [0; 4], [0; 2]),
+            (5, 2000.0, 2000.0, [1; 4], [0; 2]), // no bridge over invalid data
+            (5, 9999.0, 9999.0, [1; 4], [0; 2]), // duplicate ignored
+            (2, 9999.0, 9999.0, [1; 4], [0; 2]), // stale sample ignored
+            (6, f32::NAN, f32::NAN, [1; 4], [0; 2]),
+            (7, 3000.0, 3000.0, [1; 4], [0; 2]),
+        ] {
+            let (format, bytes) =
+                position_message(ts, [x, 0.0, z], [0.0; 3], Some(validity), resets);
+            stats.update(&make_data_message(&format, &bytes), Some(ts));
+        }
+        assert_eq!(stats.distance, 5.0);
+        assert_eq!(stats.altitude_span, 4.0);
+    }
+
+    #[test]
+    fn stationary_estimator_reset_does_not_add_a_hundred_meters() {
+        let records = [(1_000_000, 0.0, 0), (2_000_000, 100.0, 1)]
+            .into_iter()
+            .map(|(ts, x, reset)| {
+                let mut bytes =
+                    position_message(ts, [x, 0.0, 0.0], [0.0; 3], Some([1; 4]), [reset, 0]).1;
+                bytes.extend_from_slice(&f32::to_le_bytes(x));
+                bytes.extend_from_slice(&0.0_f32.to_le_bytes());
+                (1, bytes)
+            })
+            .collect::<Vec<_>>();
+        let result = synthetic_analysis(
+            1,
+            &["vehicle_local_position:uint64_t timestamp;float x;float y;float z;float vx;float vy;float vz;uint8_t xy_reset_counter;uint8_t z_reset_counter;bool xy_valid;bool z_valid;bool v_xy_valid;bool v_z_valid;float[2] delta_xy;"],
+            &[(1, 0, "vehicle_local_position")],
+            &records,
+        );
+        assert_eq!(result.stats.total_distance_m, 0.0);
+        assert_eq!(result.stats.max_altitude_diff_m, 0.0);
+    }
+
+    #[test]
+    fn instance_zero_is_not_pooled_with_other_estimators_or_imus() {
+        let mut records = Vec::new();
+        for ts in 1..=3 {
+            for (id, x) in [(1, ts as f32), (2, 1000.0)] {
+                records.push((
+                    id,
+                    position_message(ts, [x, 0.0, 0.0], [0.0; 3], Some([1; 4]), [0; 2]).1,
+                ));
+            }
+            for (id, value) in [(3, 1.0), (4, 20.0), (5, 30.0)] {
+                let mut bytes = (ts * 1_000_000).to_le_bytes().to_vec();
+                bytes.extend_from_slice(&f32::to_le_bytes(value));
+                records.push((id, bytes));
+            }
+        }
+        let result = synthetic_analysis(
+            1,
+            &[
+                "vehicle_local_position:uint64_t timestamp;float x;float y;float z;float vx;float vy;float vz;uint8_t xy_reset_counter;uint8_t z_reset_counter;bool xy_valid;bool z_valid;bool v_xy_valid;bool v_z_valid;",
+                "vehicle_imu_status:uint64_t timestamp;float accel_vibration_metric;",
+            ],
+            &[(1, 0, "vehicle_local_position"), (2, 1, "vehicle_local_position"), (3, 0, "vehicle_imu_status"), (4, 1, "vehicle_imu_status"), (5, 2, "vehicle_imu_status")],
+            &records,
+        );
+        assert_eq!(result.stats.total_distance_m, 2.0);
+        assert_eq!(result.vibration.accel_vibe_mean, Some(1.0));
+        let field = result
+            .field_stats
+            .iter()
+            .find(|s| s.topic == "vehicle_imu_status")
+            .unwrap();
+        assert_eq!(field.count, 3);
+        assert_eq!(field.mean, 1.0);
     }
 
     #[test]
@@ -1075,10 +1330,6 @@ mod tests {
     #[test]
     fn test_field_stats_fixed_wing() {
         let path = px4_ulog_fixture("fixed_wing_gps.ulg");
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("Skipping: fixed_wing_gps.ulg not available");
-            return;
-        }
         let meta = extract_metadata(&path).unwrap();
         let analysis = analyze(&path, &meta).unwrap();
 
@@ -1097,6 +1348,16 @@ mod tests {
         assert!(
             topic_names.contains("vehicle_attitude"),
             "should have vehicle_attitude stats"
+        );
+        let imu_fields = analysis
+            .field_stats
+            .iter()
+            .filter(|fs| fs.topic == "vehicle_imu_status")
+            .collect::<Vec<_>>();
+        assert!(!imu_fields.is_empty());
+        assert!(
+            imu_fields.iter().all(|fs| fs.count == 605),
+            "three separate 605-sample instances must not become 1815 samples"
         );
 
         // Verify at most MAX_FIELDS_PER_TOPIC fields per topic

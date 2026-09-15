@@ -12,9 +12,9 @@ If you're new to the module, read [`rc_loss.rs`](./rc_loss.rs) first — it's th
 
 Key properties to keep in mind when designing an analyzer:
 
-- **Single-pass, streaming.** You see each message exactly once, in timestamp order. You don't get a random-access view of the whole log. If your detection needs a window, buffer it yourself inside the analyzer struct.
+- **Single-pass, streaming.** Messages arrive in file order, not necessarily timestamp order. Handle stale/duplicate samples within a source and gaps explicitly. You don't get a random-access view of the whole log.
 - **One log at a time.** There is no batch/training phase. If your detector needs prior data (e.g. a trained model), it has to be baked into the binary as a constant, loaded from disk at startup, or derived from the current log's early samples before you start emitting results.
-- **Topic-scoped dispatch.** Messages are only delivered for topics you list in `required_topics()`. Don't try to filter them yourself in `on_message` — just declare what you need.
+- **Topic- and instance-scoped dispatch.** The factory wraps each analyzer core in `PerInstance`, isolating ULog `multi_id` state. Primary `vehicle_status` is associated by timestamp: newer status updates are deferred until measurements reach that time or the log ends. The last 128 status samples are retained; armed-only measurements older than retained history are conservatively omitted. A core receives only its source's measurements. Nonzero instances are included in `anchor.instance`; omitted means instance zero. Do not bypass the factory in production.
 - **Performance budget.** The whole diagnostic pass has a 500ms budget enforced by `cargo bench` in CI. A ~4MB log currently runs in ~37ms end-to-end. Stay cheap per message.
 
 ## Step 1: Add an `Evidence` variant
@@ -35,7 +35,7 @@ pub enum Evidence {
 }
 ```
 
-Also bump `ANALYSIS_VERSION` in the same file when your analyzer is ready to ship. That tells the reprocessing pipeline historical logs need a re-scan.
+Also bump `ANALYSIS_VERSION` in the same file when behavior or evidence changes. That tells the reprocessing pipeline historical logs need a re-scan.
 
 ## Step 2: Create the analyzer
 
@@ -145,7 +145,7 @@ impl Analyzer for YourAnalyzer {
 
 - **`id()`** is the stable machine identifier stored in the database and exposed via the API's `?diagnostic=` filter. Don't change it after release.
 - **`required_topics()`** must match the exact ULog topic names. Typos mean your analyzer silently never runs.
-- **`on_message()`** must not panic and must handle missing fields gracefully — use `parse_field::<T>()`, which returns `Option<T>`, never unwrap.
+- **`on_message()`** must not panic and must handle missing fields gracefully. Use `parse_field::<T>()` and `parse_bool()` for PX4 bool fields (with the historical uint8 fallback). Missing/invalid values are not healthy observations or zero measurements.
 - **`finish()`** takes `Box<Self>` (the pipeline owns the analyzers). Move your accumulated detections out and return them.
 
 ### Diagnostic fields
@@ -177,6 +177,7 @@ Available `FieldUnit` variants:
 | `Microseconds` | Timestamp or duration in µs |
 | `Milliseconds` | Duration in ms |
 | `Pwm` | PWM output value |
+| `ActuatorOutput` | Driver-specific output command units; not rotor feedback |
 | `Ratio` | Dimensionless ratio |
 | `Count` | Integer count |
 | `Label` | Free-form string (flight mode, innovation name, etc.) |
@@ -209,13 +210,52 @@ Until you do this, nothing in the pipeline will ever construct or call your anal
 
 CI runs [`scripts/ci/check-analyzer.sh`](../../../../scripts/ci/check-analyzer.sh) on every PR touching this directory. It grep-checks your file for a specific test pattern. At minimum you need:
 
-1. **`no_false_positives_sample`** — runs your analyzer against `tests/fixtures/sample.ulg` (a normal flight) and asserts zero detections.
-2. **A real-world detection test** named `detects_real_*` — points at a fixture ULog that actually exhibits the anomaly, asserts the detection fires with the right severity/evidence. If no fixture exists, add `SKIP_FIXTURE: <reason>` to the module doc comment and open an issue to collect one.
+1. **Healthy negative controls** — provide the required topics, real wire types, valid measurements and armed state where applicable. `sample.ulg` is only a smoke test: it is disarmed and lacks battery, GPS, RC, selector and TECS topics.
+2. **An independently labeled fixture** — verify actual telemetry and event timestamps before writing the oracle. Positive tests are named `detects_real_*`. If no fixture exists, document `SKIP_FIXTURE: <reason>`. A historical candidate shown to be a false positive must instead have `NEGATIVE_FIXTURE: <reason>` and a `no_false_positives_*fixture` regression. The CI warning records the remaining positive-data gap.
 3. **`handles_missing_fields`** — feed it a message with no fields and assert it doesn't panic and emits nothing.
-4. **At least one synthetic detection test** — uses `MessageBuilder` from [`testing.rs`](./testing.rs) to construct messages by hand. This is where you pin down your detection logic with fast deterministic tests.
-5. **A snapshot test** using `insta::assert_json_snapshot!` on the fixture output. Run `cargo insta review` locally to accept the first snapshot.
+4. **Synthetic detection and lifecycle tests** — use realistic bool/numeric schemas, multiple instances, invalid samples, timestamp boundaries, onset, recovery and end-of-log cases. Add a positive control in `testing/regressions.rs`; descriptor/evidence parity is verified for every analyzer without skipping missing fixtures.
+5. **A snapshot test** using `insta::assert_json_snapshot!`. Snapshots lock serialization, not correctness. Inspect the underlying telemetry and justify every update rather than accepting whatever the implementation produces.
 
-Copy the test block from [`rc_loss.rs`](./rc_loss.rs) and adapt it — it hits every required category.
+Use [`testing/regressions.rs`](./testing/regressions.rs) for schema-realistic positive/negative controls and instance/lifecycle coverage.
+
+## Interpretation and known limits
+
+These detectors are heuristics, not calibrated probabilities or physical root-cause
+diagnoses. Empty diagnostics do not certify a healthy flight: a required topic,
+validity flag, cell count, usable baseline or adequate sampling may be unavailable.
+
+- `motor_failure` is a legacy ID for an actuator **command** drop to zero. Evidence
+  names `motor_index`/`pwm_value` are retained for compatibility but mean output
+  channel/natural driver units. We do not infer rotor lock from a fixed 1900 limit.
+- `battery_brownout` reports connected-pack voltage below 3.3V per reported cell.
+  Battery chemistry/load matter; this does not establish a power-rail brownout.
+- `gps_interference` reports quality degradation after a usable-fix baseline.
+  It does not establish interference as the cause.
+- EKF innovation diagnostics are per estimator, including standby instances;
+  consult `estimator_selector_status` to determine which was selected. Unknown
+  ratios or gaps longer than one second break sustained-exceedance tracking.
+- Selector counter jumps are counted only when their entire observation interval
+  fits the ten-second window. Intermediate timing is unknown; average interval
+  is null for such batches. Counter resets are not treated as huge switch bursts.
+- RC regions describe receiver loss/failsafe flags. Ongoing regions end at the
+  last observed RC/vehicle-status timestamp, not an invented recovery time.
+- TECS regions stop at observed recovery, unavailable fields or gaps over one
+  second, and never claim
+  aircraft control loss from a numerical value alone.
+
+Fixture ground truth established during the correctness audit:
+
+| Fixture | Supported oracle |
+|---|---|
+| `motor_failure.ulg` | No cross-bank “drops”: bank 0 is always zero; bank 1 drops only after disarm |
+| `battery_brownout.ulg` | No low-battery finding: all 382 readings report disconnected |
+| `gps_interference.ulg` | No degradation finding: all 312 readings have no fix and zero satellites |
+| `ekf_selector_whipsaw.ulg` | Real selector counter changes and independently sustained instance-0 innovations |
+| `tecs_nonfinite_pitch.ulg` | Integrator first non-finite at 1,029,918,348µs through the last TECS sample |
+
+Positive field data is still needed for motor commands, connected low batteries,
+GPS degradation and RC loss. Do not turn the negative fixtures into positive
+oracles to satisfy a gate.
 
 ## Step 5: Run the same gates CI will
 

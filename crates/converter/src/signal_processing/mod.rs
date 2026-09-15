@@ -9,7 +9,7 @@
 //!
 //! ```text
 //! Phase 1: Extract signals (single ULog pass)
-//!   → SignalStore { topic.field → Vec<(timestamp_s, value)> }
+//!   → SignalStore { (topic, instance, field) → Vec<(timestamp_s, value)> }
 //!
 //! Phase 2: Run analyses (per module, on extracted data)
 //!   → HashMap<module_id, JSON result>
@@ -35,7 +35,8 @@ pub mod testing;
 // Re-export result types for backward compatibility
 pub use pid_step_response::{PidAnalysisResult, PidStepResponse, StepResponseHistogram};
 
-/// A time series of (timestamp_seconds, value) pairs.
+/// A time series of (timestamp_seconds, value) pairs in arrival order.
+/// Nonfinite values mark missing data and must not be interpolated across.
 pub type TimeSeries = Vec<(f64, f64)>;
 
 /// Identifies a signal to extract from a ULog file.
@@ -43,6 +44,7 @@ pub type TimeSeries = Vec<(f64, f64)>;
 pub struct SignalRequest {
     pub topic: String,
     pub field: String,
+    pub instance: u8,
 }
 
 impl SignalRequest {
@@ -50,18 +52,26 @@ impl SignalRequest {
         Self {
             topic: topic.to_string(),
             field: field.to_string(),
+            instance: 0,
         }
+    }
+
+    /// Select a ULog multi-instance explicitly; new requests default to instance zero.
+    pub fn with_instance(mut self, instance: u8) -> Self {
+        self.instance = instance;
+        self
     }
 }
 
-/// Holds extracted time-series signals keyed by (topic, field).
+/// Holds extracted time-series signals keyed by (topic, instance, field).
 pub struct SignalStore {
     signals: HashMap<SignalRequest, TimeSeries>,
 }
 
 impl SignalStore {
     /// Get a signal by request. Returns an empty slice if the signal
-    /// was not found or had no data.
+    /// topic instance was not found or had no data. Unavailable field values
+    /// are retained as NaN to mark missing data.
     pub fn get(&self, request: &SignalRequest) -> &[(f64, f64)] {
         self.signals
             .get(request)
@@ -129,13 +139,12 @@ pub fn extract_signals(
     path: &str,
     requests: &HashSet<SignalRequest>,
 ) -> Result<SignalStore, std::io::Error> {
-    // Build a topic → Vec<field> lookup for fast dispatch
-    let mut topic_fields: HashMap<&str, Vec<&str>> = HashMap::new();
+    let mut topic_fields: HashMap<(&str, u8), Vec<&SignalRequest>> = HashMap::new();
     for req in requests {
         topic_fields
-            .entry(req.topic.as_str())
+            .entry((req.topic.as_str(), req.instance))
             .or_default()
-            .push(req.field.as_str());
+            .push(req);
     }
 
     let mut signals: HashMap<SignalRequest, TimeSeries> =
@@ -145,7 +154,7 @@ pub fn extract_signals(
         if let Message::Data(data) = msg {
             let topic = data.flattened_format.message_name.as_str();
 
-            if let Some(fields) = topic_fields.get(topic) {
+            if let Some(fields) = topic_fields.get(&(topic, data.multi_id.value())) {
                 let ts = data
                     .flattened_format
                     .timestamp_field
@@ -155,15 +164,16 @@ pub fn extract_signals(
                 if let Some(ts) = ts {
                     let t_s = ts as f64 / 1_000_000.0;
 
-                    for &field in fields {
-                        if let Ok(parser) = data.flattened_format.get_field_parser::<f32>(field) {
-                            let val = parser.parse(data.data) as f64;
-                            if val.is_finite() {
-                                let key = SignalRequest::new(topic, field);
-                                if let Some(series) = signals.get_mut(&key) {
-                                    series.push((t_s, val));
-                                }
-                            }
+                    for &request in fields {
+                        let val = data
+                            .flattened_format
+                            .get_field_parser::<f32>(&request.field)
+                            .map(|parser| parser.parse(data.data) as f64)
+                            .unwrap_or(f64::NAN);
+                        if let Some(series) = signals.get_mut(request) {
+                            // Keep invalid samples as missing-data markers rather than
+                            // silently interpolating across them.
+                            series.push((t_s, val));
                         }
                     }
                 }
@@ -172,9 +182,10 @@ pub fn extract_signals(
         SimpleCallbackResult::KeepReading
     })?;
 
-    // Sort each signal by timestamp
+    // Preserve arrival order: sorting hides clock resets. Only exact repeated
+    // samples are redundant; conflicting duplicates remain invalid timestamps.
     for series in signals.values_mut() {
-        series.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        series.dedup_by(|a, b| a.0 == b.0 && a.1.to_bits() == b.1.to_bits());
     }
 
     Ok(SignalStore { signals })

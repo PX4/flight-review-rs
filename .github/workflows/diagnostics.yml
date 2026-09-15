@@ -5,20 +5,33 @@ on:
     branches: [main]
     paths:
       - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/src/analysis.rs'
+      - 'crates/converter/src/signal_processing/**'
       - 'crates/converter/tests/fixtures/**'
       - 'crates/converter/benches/**'
       - 'scripts/ci/check-analyzer.sh'
+      - '.github/workflows/diagnostics.yml'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
   pull_request:
     branches: [main]
     paths:
       - 'crates/converter/src/diagnostics/**'
+      - 'crates/converter/src/analysis.rs'
+      - 'crates/converter/src/signal_processing/**'
       - 'crates/converter/tests/fixtures/**'
       - 'crates/converter/benches/**'
       - 'scripts/ci/check-analyzer.sh'
+      - '.github/workflows/diagnostics.yml'
+      - '**/Cargo.toml'
+      - 'Cargo.lock'
+      - 'rust-toolchain.toml'
 
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  INSTA_UPDATE: "no"
 
 jobs:
   validate:
@@ -26,11 +39,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0  # needed for git diff against main
 
       - name: Check analyzer requirements
-        run: scripts/ci/check-analyzer.sh --changed-only
+        run: scripts/ci/check-analyzer.sh
 
   test:
     name: Diagnostic tests
@@ -44,23 +55,20 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Run diagnostic tests
-        run: cargo test -p flight-review --lib diagnostics -- --nocapture
+      - name: Run converter analysis and diagnostic tests
+        run: cargo test -p flight-review --lib -- --nocapture
 
-      - name: No false positives on sample.ulg
+      - name: Healthy and negative regression controls
         run: |
-          cargo test -p flight-review --lib diagnostics \
-            -- no_false_positives --nocapture
+          cargo test -p flight-review --lib no_false_positives -- --nocapture
 
       - name: Real-world fixture tests
         run: |
-          cargo test -p flight-review --lib diagnostics \
-            -- detects_real --nocapture
+          cargo test -p flight-review --lib detects_real -- --nocapture
 
       - name: Snapshot tests up to date
         run: |
-          cargo test -p flight-review --lib diagnostics \
-            -- snapshot 2>&1 || {
+          cargo test -p flight-review --lib snapshot 2>&1 || {
             echo "Snapshot tests failed. Run 'cargo insta review' locally."
             exit 1
           }

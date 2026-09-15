@@ -2,9 +2,8 @@
 //!
 //! Monitors `tecs_status` for the pitch integrator (`pitch_integ`) or pitch
 //! setpoint (`pitch_sp_rad`) becoming non-finite (NaN or +/-Inf). This is a
-//! real, recurring, flight-critical failure: once the pitch integrator latches
-//! a NaN it propagates into the pitch setpoint, the aircraft loses pitch
-//! control, and it sheds altitude until a pilot intervenes.
+//! numerical anomaly, not proof of aircraft control loss. Regions end on
+//! observed recovery, unavailable fields, or the last sample.
 //!
 //! TECS is a low-rate fixed-wing/VTOL topic, so a single `is_finite()` check
 //! per sample is cheap and fits inside the diagnostics budget.
@@ -24,6 +23,7 @@ pub struct TecsNonfinitePitchAnalyzer {
     throttle_integ_nonfinite: bool,
     /// Last timestamp seen on the topic — becomes the region end.
     last_timestamp: u64,
+    detections: Vec<Diagnostic>,
 }
 
 impl Default for TecsNonfinitePitchAnalyzer {
@@ -38,7 +38,38 @@ impl TecsNonfinitePitchAnalyzer {
             first_nonfinite: None,
             throttle_integ_nonfinite: false,
             last_timestamp: 0,
+            detections: Vec::new(),
         }
+    }
+
+    fn close_region(&mut self, end: u64) {
+        let Some((ts, field)) = self.first_nonfinite.take() else {
+            return;
+        };
+        let field_name = match field {
+            TecsNonfinitePitchField::PitchInteg => "pitch_integ",
+            TecsNonfinitePitchField::PitchSpRad => "pitch_sp_rad",
+        };
+        self.detections.push(Diagnostic {
+            id: "tecs_nonfinite_pitch".to_string(),
+            summary: format!(
+                "TECS {} non-finite (NaN or infinity) observed from {:.1}s to {:.1}s",
+                field_name,
+                ts as f64 / 1_000_000.0,
+                end as f64 / 1_000_000.0,
+            ),
+            severity: Severity::Critical,
+            kind: AnomalyKind::Region {
+                end_timestamp_us: end.max(ts),
+            },
+            timestamp_us: ts,
+            anchor: PlotAnchor::new(TOPIC, field_name),
+            descriptor: self.output_descriptor(),
+            evidence: Evidence::TecsNonfinitePitch {
+                field,
+                throttle_integ_nonfinite: self.throttle_integ_nonfinite,
+            },
+        });
     }
 }
 
@@ -66,11 +97,11 @@ impl Analyzer for TecsNonfinitePitchAnalyzer {
             .as_ref()
             .map(|tf| tf.parse_timestamp(data.data))
             .unwrap_or(0);
-        self.last_timestamp = ts;
-
-        // Once latched, keep tracking the end timestamp but don't re-detect.
-        if self.first_nonfinite.is_some() {
+        if ts < self.last_timestamp {
             return;
+        }
+        if ts.saturating_sub(self.last_timestamp) > 1_000_000 {
+            self.close_region(self.last_timestamp);
         }
 
         let pitch_integ = parse_field::<f32>(data, "pitch_integ");
@@ -85,43 +116,32 @@ impl Analyzer for TecsNonfinitePitchAnalyzer {
         };
 
         if let Some(field) = field {
-            self.throttle_integ_nonfinite = parse_field::<f32>(data, "throttle_integ")
-                .map(|v| !v.is_finite())
-                .unwrap_or(false);
-            self.first_nonfinite = Some((ts, field));
+            if self.first_nonfinite.is_none() {
+                self.throttle_integ_nonfinite = parse_field::<f32>(data, "throttle_integ")
+                    .map(|v| !v.is_finite())
+                    .unwrap_or(false);
+                self.first_nonfinite = Some((ts, field));
+            }
+        } else {
+            let origin_available =
+                self.first_nonfinite
+                    .as_ref()
+                    .is_some_and(|(_, field)| match field {
+                        TecsNonfinitePitchField::PitchInteg => pitch_integ.is_some(),
+                        TecsNonfinitePitchField::PitchSpRad => pitch_sp_rad.is_some(),
+                    });
+            self.close_region(if origin_available {
+                ts
+            } else {
+                self.last_timestamp
+            });
         }
+        self.last_timestamp = ts;
     }
 
-    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
-        let descriptor = self.output_descriptor();
-        let Some((ts, field)) = self.first_nonfinite else {
-            return vec![];
-        };
-
-        // Region runs from first detection to the last sample seen.
-        let end = self.last_timestamp.max(ts);
-        let field_name = match field {
-            TecsNonfinitePitchField::PitchInteg => "pitch_integ",
-            TecsNonfinitePitchField::PitchSpRad => "pitch_sp_rad",
-        };
-
-        vec![Diagnostic {
-            id: "tecs_nonfinite_pitch".to_string(),
-            summary: format!(
-                "TECS {} became non-finite (NaN) at {:.1}s and never recovered — aircraft loses pitch control",
-                field_name,
-                ts as f64 / 1_000_000.0,
-            ),
-            severity: Severity::Critical,
-            kind: AnomalyKind::Region { end_timestamp_us: end },
-            timestamp_us: ts,
-            anchor: PlotAnchor::new(TOPIC, "pitch_integ"),
-            descriptor,
-            evidence: Evidence::TecsNonfinitePitch {
-                field,
-                throttle_integ_nonfinite: self.throttle_integ_nonfinite,
-            },
-        }]
+    fn finish(mut self: Box<Self>) -> Vec<Diagnostic> {
+        self.close_region(self.last_timestamp);
+        self.detections
     }
 
     fn output_descriptor(&self) -> OutputDescriptor {
