@@ -6,7 +6,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-# Build server with PostgreSQL support and both CLI entry points
+# Build server with PostgreSQL support and the CLI
 ARG SERVER_FEATURES=postgres
 RUN cargo build --release -p flight-review-server --features "$SERVER_FEATURES" \
     && cargo build --release -p flight-review --bins
@@ -20,7 +20,6 @@ RUN apt-get update \
 
 COPY --from=builder /build/target/release/flight-review-server /usr/local/bin/
 COPY --from=builder /build/target/release/flight-review /usr/local/bin/
-COPY --from=builder /build/target/release/ulog-convert /usr/local/bin/
 
 # Default data directory
 RUN mkdir -p /data/files

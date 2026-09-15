@@ -107,24 +107,15 @@ Key capabilities:
 - **Export** per-topic Parquet files with metadata when requested
 - **Process directories** automatically, using the same options as individual files
 
-Every export produces a `manifest.json` that maps the output (source file, topics to Parquet paths, diagnostic results). Directory exports additionally produce an `index.json` at the output root. The legacy `ulog-convert` binary remains available with its existing conversion-first interface.
+Every export produces a `manifest.json` that maps the output (source file, topics to Parquet paths, diagnostic results). Directory exports additionally produce an `index.json` at the output root.
 
 ### Two Paths
 
 There are two ways to use the project -- through the server for production deployments, or through the CLI for local and scripted workflows:
 
-```
-                       .ulg files
-                           |
-                 +---------+----------+
-                 |                    |
-          flight-review       flight-review-server
-               (CLI)                 (HTTP API)
-                 |                    |
-          Analysis report       API + Storage
-          Optional Parquet      (S3 / local fs
-          and metadata export   + SQLite/Postgres)
-```
+![PX4 ULog files flow to the CLI for local analysis and optional export, or to the server for hosted review and storage.](docs/architecture.svg)
+
+[Mermaid source](docs/architecture.mmd)
 
 ### Workspace Layout
 
@@ -139,10 +130,8 @@ flight-review-rs/
 │   │   │   ├── analysis.rs     # Flight modes, stats, battery, GPS, vibration, param diff
 │   │   │   ├── diagnostics/    # Diagnostic analyzers (motor, GPS, battery, EKF, RC)
 │   │   │   ├── signal_processing/ # Signal processing framework (PID step response, DSP)
-│   │   │   ├── pid_analysis.rs # Backward-compat facade for signal_processing
 │   │   │   └── bin/
-│   │   │       ├── flight_review.rs # Analysis-first CLI
-│   │   │       └── ulog_convert.rs  # Legacy conversion-first CLI
+│   │   │       └── flight_review.rs # Analysis-first CLI
 │   │   ├── benches/            # Criterion benchmarks
 │   │   ├── tests/fixtures/     # ULog test fixtures (normal + failure cases)
 │   │   └── Cargo.toml
@@ -481,19 +470,6 @@ Data output is always compact JSON; directory output is newline-delimited JSON (
 Processing failures produce a nonzero exit status, including a directory containing both successful and failed logs. Finding an anomaly is not itself an execution failure. Empty directories, invalid paths, and unknown analyzer IDs are errors. A recoverable truncated or malformed log can still produce a report from its valid prefix; inspect `summary.completeness` before treating the report as complete.
 
 An analyzer is still attempted when its input is incomplete or unsuitable. An `unavailable` outcome explains why it could not produce a useful result, rather than reporting a healthy flight or silently omitting the analyzer. For example, PID reports insufficient samples, insufficient sampling rate or overlap, gaps/nonfinite data, or too few windows meeting excitation and response-quality criteria. Such outcomes are not execution failures. Diagnostic thresholds remain heuristics rather than independently verified physical diagnoses.
-
-### Legacy Compatibility
-
-`ulog-convert` remains available in release downloads and Docker images. Its default is still conversion, its `analyze` subcommand still runs signal processing, and its directory interface still uses `batch`. Existing invocations remain supported:
-
-```bash
-ulog-convert flight.ulg output/
-ulog-convert --metadata-only --output-format compact flight.ulg
-ulog-convert analyze flight.ulg --modules pid_step_response
-ulog-convert batch logs/ --diagnostics --format json
-```
-
-New scripts should use `flight-review`. Both entry points report processing failures with a nonzero exit status.
 
 ### Conversion Output
 

@@ -76,10 +76,6 @@ pub fn write_json<T: Serialize + ?Sized>(
     std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }
 
-pub fn analyzed_metadata(path: &str) -> Result<crate::metadata::FlightMetadata, String> {
-    analyzed_metadata_with_analyzers(path, crate::diagnostics::create_analyzers())
-}
-
 pub fn analyzed_metadata_with_analyzers(
     path: &str,
     analyzers: Vec<Box<dyn crate::diagnostics::Analyzer>>,

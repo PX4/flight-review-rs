@@ -26,14 +26,6 @@ fn run(root: &Path, args: &[&str]) -> Output {
         .unwrap()
 }
 
-fn legacy(root: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_ulog-convert"))
-        .current_dir(root)
-        .args(args)
-        .output()
-        .unwrap()
-}
-
 fn success(output: &Output) {
     assert!(
         output.status.success(),
@@ -449,6 +441,7 @@ fn list_and_help_advertise_only_canonical_commands() {
     let help = run(root.path(), &["--help"]);
     success(&help);
     let help = String::from_utf8(help.stdout).unwrap();
+    assert!(help.contains(env!("CARGO_PKG_DESCRIPTION")));
     assert!(help.contains("analyze"));
     assert!(help.contains("convert"));
     assert!(help.contains("list"));
@@ -546,120 +539,6 @@ fn symlinks_are_not_followed_or_written_through() {
     assert!(!root.path().join("outside/nested").exists());
 }
 
-#[test]
-fn legacy_default_conversion_and_metadata_contracts_remain() {
-    let root = workspace();
-    copy_log(&root.path().join("flight.ulg"));
-    let output = legacy(root.path(), &["flight.ulg"]);
-    success(&output);
-    validate_export(&root.path().join("flight_parquet"));
-    let output = legacy(
-        root.path(),
-        &[
-            "flight.ulg",
-            "--metadata-only",
-            "--output-format",
-            "compact",
-        ],
-    );
-    success(&output);
-    let metadata = &records(&output)[0];
-    assert!(metadata["analysis"].is_object());
-    assert!(metadata["topics"].is_object());
-    assert!(metadata.get("outcome").is_none());
-    let output = legacy(root.path(), &["flight.ulg", "metadata", "--metadata-only"]);
-    success(&output);
-    assert!(root.path().join("metadata/metadata.json").exists());
-    assert!(!root.path().join("metadata/manifest.json").exists());
-}
-
-#[test]
-fn legacy_signal_commands_preserve_results() {
-    let root = workspace();
-    copy_log(&root.path().join("flight.ulg"));
-    let output = legacy(
-        root.path(),
-        &["analyze", "flight.ulg", "--modules", "pid_step_response"],
-    );
-    success(&output);
-    assert!(records(&output)[0].is_object());
-    let output = legacy(root.path(), &["flight.ulg", "--pid-analysis"]);
-    success(&output);
-    assert!(records(&output)[0]["axes"].is_array());
-    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
-}
-
-#[test]
-fn legacy_batch_errors_are_visible_and_nonzero_under_findings_filter() {
-    let root = workspace();
-    copy_log(&root.path().join("logs/good.ulg"));
-    fs::write(root.path().join("logs/bad.ulg"), b"bad").unwrap();
-    let output = legacy(
-        root.path(),
-        &[
-            "batch",
-            "logs",
-            "--diagnostics-only",
-            "--format",
-            "json",
-            "--jobs",
-            "2",
-        ],
-    );
-    assert!(!output.status.success());
-    let records = records(&output);
-    assert!(records
-        .iter()
-        .any(|r| r["file"] == "logs/bad.ulg" && r["error"].is_string()));
-    let unfiltered = legacy(
-        root.path(),
-        &["batch", "logs", "--diagnostics", "--format", "json"],
-    );
-    assert!(!unfiltered.status.success());
-    assert_eq!(crate::records(&unfiltered).len(), 2);
-    let output = legacy(
-        root.path(),
-        &["batch", "missing", "--diagnostics", "--format", "json"],
-    );
-    assert!(!output.status.success());
-    let output = legacy(root.path(), &["batch", "logs", "--jobs", "0"]);
-    assert!(!output.status.success());
-}
-
-#[test]
-fn legacy_metadata_and_index_write_errors_fail_without_panics() {
-    let root = workspace();
-    copy_log(&root.path().join("logs/flight.ulg"));
-    fs::create_dir_all(root.path().join("export/metadata.json")).unwrap();
-    let output = legacy(
-        root.path(),
-        &["logs/flight.ulg", "export", "--metadata-only"],
-    );
-    assert!(!output.status.success());
-    assert!(!String::from_utf8_lossy(&output.stderr).contains("panicked"));
-    fs::create_dir_all(root.path().join("batch/index.json")).unwrap();
-    let output = legacy(
-        root.path(),
-        &["batch", "logs", "--output", "batch", "--format", "json"],
-    );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("index.json"));
-}
-
-#[test]
-fn legacy_batch_refuses_colliding_stems_before_conversion() {
-    let root = workspace();
-    copy_log(&root.path().join("logs/a/flight.ulg"));
-    copy_log(&root.path().join("logs/b/flight.ulg"));
-    let output = legacy(
-        root.path(),
-        &["batch", "logs", "--output", "export", "--format", "json"],
-    );
-    assert!(!output.status.success());
-    assert!(!root.path().join("export").exists());
-    assert!(output.stdout.is_empty());
-}
-
 #[cfg(unix)]
 #[test]
 fn read_and_walk_failures_are_not_ignored() {
@@ -681,16 +560,9 @@ fn read_and_walk_failures_are_not_ignored() {
     fs::create_dir(&directory).unwrap();
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o0)).unwrap();
     if fs::read_dir(&directory).is_err() {
-        for output in [
-            run(root.path(), &["logs"]),
-            legacy(
-                root.path(),
-                &["batch", "logs", "--diagnostics", "--format", "json"],
-            ),
-        ] {
-            assert!(!output.status.success());
-            assert!(String::from_utf8_lossy(&output.stderr).contains("locked"));
-        }
+        let output = run(root.path(), &["logs"]);
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("locked"));
     }
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700)).unwrap();
 }
@@ -733,10 +605,6 @@ fn nonfinite_metadata_is_an_explicit_export_error() {
     let record = &records(&output)[0];
     assert_eq!(record["outcome"], "error");
     assert!(record["error"].as_str().unwrap().contains("nonfinite"));
-    let output = legacy(root.path(), &["nonfinite.ulg", "--metadata-only"]);
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("nonfinite"));
 }
 
 fn message(log: &mut Vec<u8>, kind: u8, payload: &[u8]) {
@@ -867,12 +735,6 @@ fn assert_gps_exports(root: &Path, expected: Value) {
             serde_json::from_slice(&fs::read(export.join("metadata.json")).unwrap()).unwrap();
         assert_eq!(metadata["gps_first_fix"], expected);
     }
-    let output = legacy(
-        root,
-        &["gps.ulg", "--metadata-only", "--output-format", "compact"],
-    );
-    success(&output);
-    assert_eq!(records(&output)[0]["gps_first_fix"], expected);
 }
 
 #[test]
