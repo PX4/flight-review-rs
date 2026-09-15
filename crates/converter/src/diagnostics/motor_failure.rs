@@ -1,12 +1,10 @@
-//! Motor failure detection analyzer.
+//! Actuator command discontinuities while armed (legacy ID: motor_failure).
+//! Outputs are commands in driver-specific units, not motor feedback. Without
+//! output-function mappings and driver limits we cannot identify motors, infer
+//! saturation from 1900, or diagnose a locked/disconnected rotor.
 //!
-//! Detects two failure modes while the vehicle is armed:
-//! - **PWM drop to zero**: A motor output suddenly drops to 0, indicating
-//!   a motor disconnect or ESC failure.
-//! - **Locked at max**: A motor output saturates at maximum PWM for a
-//!   sustained period, indicating a locked rotor or mechanical failure.
-
-use std::collections::{HashSet, VecDeque};
+//! NEGATIVE_FIXTURE: motor_failure.ulg has separate output banks, not the
+//! formerly asserted six simultaneous drops. A labeled positive fixture is needed.
 
 use super::{
     parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, MotorFailureMode,
@@ -17,23 +15,13 @@ use px4_ulog::stream_parser::model::DataMessage;
 
 /// Maximum number of motors to track.
 const MAX_MOTORS: usize = 16;
-/// Sliding window size per motor.
-const WINDOW_SIZE: usize = 50;
-/// PWM threshold for "locked at max" detection.
-const PWM_MAX_THRESHOLD: f32 = 1900.0;
 
 pub struct MotorFailureAnalyzer {
     armed: bool,
     current_flight_mode: String,
-    motor_windows: Vec<VecDeque<(u64, f32)>>,
+    previous_outputs: [Option<f32>; MAX_MOTORS],
+    last_sample_us: Option<u64>,
     detections: Vec<Diagnostic>,
-    /// Track which (motor_index, failure_mode) pairs have already fired.
-    fired: HashSet<(u8, MotorFailureMode)>,
-    /// Track which motors have been active (non-zero output while armed).
-    /// Unused channels stay at 0 and should not be flagged.
-    motor_was_active: Vec<bool>,
-    /// Number of motors detected from the log.
-    motor_count: Option<usize>,
 }
 
 impl Default for MotorFailureAnalyzer {
@@ -47,11 +35,9 @@ impl MotorFailureAnalyzer {
         Self {
             armed: false,
             current_flight_mode: "Unknown".to_string(),
-            motor_windows: Vec::new(),
+            previous_outputs: [None; MAX_MOTORS],
+            last_sample_us: None,
             detections: Vec::new(),
-            fired: HashSet::new(),
-            motor_was_active: Vec::new(),
-            motor_count: None,
         }
     }
 
@@ -75,7 +61,7 @@ impl Analyzer for MotorFailureAnalyzer {
     }
 
     fn description(&self) -> &str {
-        "PWM drop/lock detection while armed"
+        "Actuator command dropped to zero while armed (not motor feedback)"
     }
 
     fn required_topics(&self) -> &[&str] {
@@ -89,6 +75,9 @@ impl Analyzer for MotorFailureAnalyzer {
             "vehicle_status" => {
                 if let Some(arming) = parse_field::<u8>(data, "arming_state") {
                     self.armed = arming == 2;
+                    if !self.armed {
+                        self.previous_outputs.fill(None);
+                    }
                 }
                 if let Some(nav) = parse_field::<u8>(data, "nav_state") {
                     self.current_flight_mode = nav_state_name(nav).to_string();
@@ -99,64 +88,38 @@ impl Analyzer for MotorFailureAnalyzer {
                     return;
                 }
 
-                let ts = data
-                    .flattened_format
-                    .timestamp_field
-                    .as_ref()
-                    .map(|tf| tf.parse_timestamp(data.data))
-                    .unwrap_or(0);
-
-                // Auto-detect motor count on first message
-                if self.motor_count.is_none() {
-                    let count = Self::detect_motor_count(data);
-                    self.motor_count = Some(count);
-                    self.motor_windows = (0..count)
-                        .map(|_| VecDeque::with_capacity(WINDOW_SIZE))
-                        .collect();
-                    self.motor_was_active = vec![false; count];
+                let Some(ts) = super::timestamp(data) else {
+                    return;
+                };
+                if self.last_sample_us.is_some_and(|previous| ts <= previous) {
+                    return;
                 }
-
-                let count = self.motor_count.unwrap_or(0);
+                self.last_sample_us = Some(ts);
+                let count = parse_field::<u32>(data, "noutputs")
+                    .map(|count| count.min(MAX_MOTORS as u32) as usize)
+                    .unwrap_or_else(|| Self::detect_motor_count(data));
+                self.previous_outputs[count..].fill(None);
                 for i in 0..count {
                     let field_name = format!("output[{i}]");
-                    let Some(pwm) = parse_field::<f32>(data, &field_name) else {
+                    let Some(pwm) =
+                        parse_field::<f32>(data, &field_name).filter(|value| value.is_finite())
+                    else {
+                        self.previous_outputs[i] = None;
                         continue;
                     };
-
-                    if let Some(window) = self.motor_windows.get_mut(i) {
-                        window.push_back((ts, pwm));
-                        if window.len() > WINDOW_SIZE {
-                            window.pop_front();
-                        }
-                    }
-
                     let motor_idx = i as u8;
-
-                    // Track which motors have been active (non-zero while armed)
-                    if pwm != 0.0 {
-                        if let Some(active) = self.motor_was_active.get_mut(i) {
-                            *active = true;
-                        }
-                    }
-
-                    // Check: PWM drop to zero — only if motor was previously active
-                    let was_active = self.motor_was_active.get(i).copied().unwrap_or(false);
-                    if pwm == 0.0
-                        && was_active
-                        && !self
-                            .fired
-                            .contains(&(motor_idx, MotorFailureMode::DropToZero))
-                    {
-                        self.fired.insert((motor_idx, MotorFailureMode::DropToZero));
+                    let dropped = pwm == 0.0 && self.previous_outputs[i].is_some_and(|v| v > 0.0);
+                    self.previous_outputs[i] = Some(pwm);
+                    if dropped {
                         self.detections.push(Diagnostic {
                             id: "motor_failure".to_string(),
                             summary: format!(
-                                "Motor {} output dropped to 0 PWM at {:.1}s while armed in {} mode",
+                                "Actuator output {} command dropped to zero at {:.1}s while armed in {} mode",
                                 i,
                                 ts as f64 / 1_000_000.0,
                                 self.current_flight_mode
                             ),
-                            severity: Severity::Critical,
+                            severity: Severity::Warning,
                             kind: AnomalyKind::Point,
                             timestamp_us: ts,
                             anchor: PlotAnchor::new("actuator_outputs", &format!("output[{i}]")),
@@ -168,45 +131,6 @@ impl Analyzer for MotorFailureAnalyzer {
                                 flight_mode: self.current_flight_mode.clone(),
                             },
                         });
-                    }
-
-                    // Check: Locked at max
-                    if let Some(window) = self.motor_windows.get(i) {
-                        if window.len() == WINDOW_SIZE
-                            && window.iter().all(|(_, p)| *p >= PWM_MAX_THRESHOLD)
-                            && !self
-                                .fired
-                                .contains(&(motor_idx, MotorFailureMode::LockedAtMax))
-                        {
-                            self.fired
-                                .insert((motor_idx, MotorFailureMode::LockedAtMax));
-                            let first_ts = window.front().map(|(t, _)| *t).unwrap_or(ts);
-                            self.detections.push(Diagnostic {
-                                id: "motor_failure".to_string(),
-                                summary: format!(
-                                    "Motor {} locked at max PWM from {:.1}s to {:.1}s while armed",
-                                    i,
-                                    first_ts as f64 / 1_000_000.0,
-                                    ts as f64 / 1_000_000.0,
-                                ),
-                                severity: Severity::Warning,
-                                kind: AnomalyKind::Region {
-                                    end_timestamp_us: ts,
-                                },
-                                timestamp_us: first_ts,
-                                anchor: PlotAnchor::new(
-                                    "actuator_outputs",
-                                    &format!("output[{i}]"),
-                                ),
-                                descriptor: self.output_descriptor(),
-                                evidence: Evidence::MotorFailure {
-                                    motor_index: motor_idx,
-                                    pwm_value: pwm,
-                                    mode: MotorFailureMode::LockedAtMax,
-                                    flight_mode: self.current_flight_mode.clone(),
-                                },
-                            });
-                        }
                     }
                 }
             }
@@ -221,7 +145,7 @@ impl Analyzer for MotorFailureAnalyzer {
     fn output_descriptor(&self) -> OutputDescriptor {
         OutputDescriptor::new()
             .field("motor_index", FieldUnit::Count)
-            .field("pwm_value", FieldUnit::Pwm)
+            .field("pwm_value", FieldUnit::ActuatorOutput)
             .field("flight_mode", FieldUnit::Label)
             .field("mode", FieldUnit::Label)
     }
@@ -270,7 +194,7 @@ mod tests {
 
         let diags = Box::new(analyzer).finish();
         assert_eq!(diags.len(), 1);
-        assert_eq!(diags[0].severity, Severity::Critical);
+        assert_eq!(diags[0].severity, Severity::Warning);
         assert_eq!(diags[0].kind, AnomalyKind::Point);
         assert_eq!(diags[0].anchor.topic, "actuator_outputs");
         assert_eq!(diags[0].anchor.field, "output[1]");
@@ -417,16 +341,11 @@ mod tests {
 
     // ---- Real-world fixture test ----
     #[test]
-    fn detects_real_motor_failure() {
+    fn no_false_positives_multi_output_fixture() {
         let diags = analyze_fixture_for("motor_failure.ulg", "motor_failure");
-        assert!(
-            !diags.is_empty(),
-            "Should detect motor failures in real crash log"
-        );
-        assert!(
-            diags.iter().any(|d| d.severity == Severity::Critical),
-            "Should have at least one critical motor failure"
-        );
+        // Instance 0 is always zero; instances 1/2 are separate active outputs.
+        // The only actual instance-1 zero transitions occur after disarm.
+        assert!(diags.is_empty());
         insta::assert_json_snapshot!(diags);
     }
 }

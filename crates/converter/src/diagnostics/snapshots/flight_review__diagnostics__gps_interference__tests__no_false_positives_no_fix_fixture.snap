@@ -1,0 +1,5 @@
+---
+source: crates/converter/src/diagnostics/gps_interference.rs
+expression: diags
+---
+[]

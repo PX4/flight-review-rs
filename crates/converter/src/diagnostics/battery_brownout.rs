@@ -1,19 +1,20 @@
 //! Battery brownout detection analyzer.
 //!
-//! Detects dangerously low battery voltage during armed flight. Auto-detects
-//! cell count from initial voltage and flags when voltage drops below
-//! critical threshold per cell.
+//! Reports low voltage on a connected battery while armed, using its reported
+//! cell count. This threshold is a heuristic, not evidence of a power-rail
+//! brownout. Unknown cell count/connection state is not inferred from voltage.
+//!
+//! NEGATIVE_FIXTURE: battery_brownout.ulg is a disconnected 4S sensor, not a
+//! demonstrated brownout. A labeled positive flight fixture is still needed.
 
 use super::{
-    parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
-    PlotAnchor, Severity,
+    parse_bool, parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit,
+    OutputDescriptor, PlotAnchor, Severity,
 };
 use px4_ulog::stream_parser::model::DataMessage;
 
 /// Per-cell critical voltage threshold (V).
 const CRITICAL_VOLTAGE_PER_CELL: f32 = 3.3;
-/// Nominal full-charge voltage per cell for cell count estimation.
-const NOMINAL_FULL_VOLTAGE_PER_CELL: f32 = 4.2;
 /// Minimum time (microseconds) between detections.
 /// Set high to avoid flooding — one detection per brownout event is enough.
 const DEDUP_INTERVAL_US: u64 = 30_000_000;
@@ -22,7 +23,8 @@ pub struct BatteryBrownoutAnalyzer {
     armed: bool,
     cell_count: Option<u8>,
     critical_threshold_v: f32,
-    last_detection_us: u64,
+    last_detection_us: Option<u64>,
+    last_sample_us: Option<u64>,
     detections: Vec<Diagnostic>,
 }
 
@@ -38,14 +40,10 @@ impl BatteryBrownoutAnalyzer {
             armed: false,
             cell_count: None,
             critical_threshold_v: 0.0,
-            last_detection_us: 0,
+            last_detection_us: None,
+            last_sample_us: None,
             detections: Vec::new(),
         }
-    }
-
-    fn estimate_cell_count(voltage: f32) -> u8 {
-        let cells = (voltage / NOMINAL_FULL_VOLTAGE_PER_CELL).round() as u8;
-        cells.clamp(1, 12)
     }
 }
 
@@ -69,10 +67,31 @@ impl Analyzer for BatteryBrownoutAnalyzer {
             "vehicle_status" => {
                 if let Some(arming) = parse_field::<u8>(data, "arming_state") {
                     self.armed = arming == 2;
+                    if !self.armed {
+                        self.last_detection_us = None;
+                    }
                 }
             }
             "battery_status" => {
+                let Some(ts) = super::timestamp(data) else {
+                    return;
+                };
+                if self.last_sample_us.is_some_and(|previous| ts <= previous) {
+                    return;
+                }
+                self.last_sample_us = Some(ts);
+                if parse_bool(data, "connected") != Some(true) {
+                    self.cell_count = None;
+                    self.last_detection_us = None;
+                    return;
+                }
+                let Some(cells) = parse_field::<u8>(data, "cell_count").filter(|cells| *cells > 0)
+                else {
+                    self.cell_count = None;
+                    return;
+                };
                 let Some(voltage) = parse_field::<f32>(data, "voltage_v")
+                    .filter(|v| v.is_finite() && *v > 0.0)
                     .or_else(|| parse_field::<f32>(data, "voltage_filtered_v"))
                 else {
                     return;
@@ -82,34 +101,30 @@ impl Analyzer for BatteryBrownoutAnalyzer {
                     return;
                 }
 
-                // Estimate cell count from first reading
-                if self.cell_count.is_none() {
-                    let cells = Self::estimate_cell_count(voltage);
-                    self.cell_count = Some(cells);
-                    self.critical_threshold_v = cells as f32 * CRITICAL_VOLTAGE_PER_CELL;
+                if self.cell_count != Some(cells) {
+                    self.last_detection_us = None;
                 }
+                self.cell_count = Some(cells);
+                self.critical_threshold_v = cells as f32 * CRITICAL_VOLTAGE_PER_CELL;
 
                 if !self.armed {
                     return;
                 }
 
-                let ts = data
-                    .flattened_format
-                    .timestamp_field
-                    .as_ref()
-                    .map(|tf| tf.parse_timestamp(data.data))
-                    .unwrap_or(0);
-
                 // Deduplication
-                if ts > 0 && ts - self.last_detection_us < DEDUP_INTERVAL_US {
+                if self
+                    .last_detection_us
+                    .is_some_and(|last| ts.saturating_sub(last) < DEDUP_INTERVAL_US)
+                {
                     return;
                 }
 
                 if voltage < self.critical_threshold_v {
                     let current = parse_field::<f32>(data, "current_a")
-                        .or_else(|| parse_field::<f32>(data, "current_filtered_a"));
+                        .or_else(|| parse_field::<f32>(data, "current_filtered_a"))
+                        .filter(|current| current.is_finite() && *current >= 0.0);
 
-                    self.last_detection_us = ts;
+                    self.last_detection_us = Some(ts);
                     self.detections.push(Diagnostic {
                         id: "battery_brownout".to_string(),
                         summary: format!(
@@ -174,6 +189,8 @@ mod tests {
         let (fmt2, data2) = MessageBuilder::new("battery_status")
             .timestamp(2_000_000)
             .field_f32("voltage_v", 16.0)
+            .field_bool("connected", true)
+            .field_u8("cell_count", 4)
             .field_f32("current_a", 10.0)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
@@ -183,6 +200,8 @@ mod tests {
         let (fmt3, data3) = MessageBuilder::new("battery_status")
             .timestamp(40_000_000)
             .field_f32("voltage_v", 12.5)
+            .field_bool("connected", true)
+            .field_u8("cell_count", 4)
             .field_f32("current_a", 15.0)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
@@ -220,6 +239,8 @@ mod tests {
         let (fmt2, data2) = MessageBuilder::new("battery_status")
             .timestamp(2_000_000)
             .field_f32("voltage_v", 16.0)
+            .field_bool("connected", true)
+            .field_u8("cell_count", 4)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
@@ -228,6 +249,8 @@ mod tests {
         let (fmt3, data3) = MessageBuilder::new("battery_status")
             .timestamp(10_000_000)
             .field_f32("voltage_v", 10.0)
+            .field_bool("connected", true)
+            .field_u8("cell_count", 4)
             .build();
         let dm3 = make_data_message(&fmt3, &data3);
         analyzer.on_message(&dm3);
@@ -265,6 +288,8 @@ mod tests {
         let (fmt2, data2) = MessageBuilder::new("battery_status")
             .timestamp(2_000_000)
             .field_f32("voltage_v", 16.0)
+            .field_bool("connected", true)
+            .field_u8("cell_count", 4)
             .build();
         let dm2 = make_data_message(&fmt2, &data2);
         analyzer.on_message(&dm2);
@@ -274,21 +299,43 @@ mod tests {
             let (fmt3, data3) = MessageBuilder::new("battery_status")
                 .timestamp(ts)
                 .field_f32("voltage_v", 12.0)
+                .field_bool("connected", true)
+                .field_u8("cell_count", 4)
                 .build();
             let dm3 = make_data_message(&fmt3, &data3);
             analyzer.on_message(&dm3);
         }
 
         let diags = Box::new(analyzer).finish();
-        assert_eq!(diags.len(), 1, "Should deduplicate within 2s interval");
+        assert_eq!(diags.len(), 1, "Should deduplicate within 30s interval");
     }
 
     #[test]
-    fn cell_count_estimation() {
-        assert_eq!(BatteryBrownoutAnalyzer::estimate_cell_count(16.8), 4);
-        assert_eq!(BatteryBrownoutAnalyzer::estimate_cell_count(12.6), 3);
-        assert_eq!(BatteryBrownoutAnalyzer::estimate_cell_count(25.2), 6);
-        assert_eq!(BatteryBrownoutAnalyzer::estimate_cell_count(4.2), 1);
+    fn reported_cells_detect_depleted_pack_before_thirty_seconds() {
+        let mut analyzer = BatteryBrownoutAnalyzer::new();
+        feed(
+            &mut analyzer,
+            MessageBuilder::new("vehicle_status")
+                .timestamp(0)
+                .field_u8("arming_state", 2),
+            0,
+        );
+        for (ts, voltage) in [(1_000_000, 21.0), (2_000_000, 18.0)] {
+            feed(
+                &mut analyzer,
+                MessageBuilder::new("battery_status")
+                    .timestamp(ts)
+                    .field_bool("connected", true)
+                    .field_u8("cell_count", 6)
+                    .field_f32("voltage_v", voltage),
+                0,
+            );
+        }
+        let diags = Box::new(analyzer).finish();
+        assert_eq!(diags.len(), 1);
+        assert_eq!(diags[0].timestamp_us, 2_000_000);
+        assert!(matches!(diags[0].evidence, Evidence::BatteryBrownout {
+            critical_threshold_v, .. } if (critical_threshold_v - 19.8).abs() < 0.001));
     }
 
     #[test]
@@ -298,16 +345,11 @@ mod tests {
     }
 
     #[test]
-    fn detects_real_battery_brownout() {
+    fn no_false_positives_disconnected_fixture() {
         let diags = analyze_fixture_for("battery_brownout.ulg", "battery_brownout");
-        assert!(
-            !diags.is_empty(),
-            "Should detect brownout in real low-voltage log"
-        );
-        assert!(
-            diags.iter().all(|d| d.severity == Severity::Critical),
-            "All brownout detections should be critical"
-        );
+        // All 382 readings report connected=false and cell_count=4. The
+        // 0..0.133V ADC noise is not evidence of a 1S battery brownout.
+        assert!(diags.is_empty());
         insta::assert_json_snapshot!(diags);
     }
 }

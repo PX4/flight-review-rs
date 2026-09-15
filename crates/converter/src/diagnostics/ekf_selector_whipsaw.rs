@@ -32,8 +32,9 @@ const DEDUP_INTERVAL_US: u64 = 30_000_000; // 30 seconds
 const DEGRADED_TEST_RATIO: f32 = 1.0;
 
 pub struct EkfSelectorWhipsawAnalyzer {
-    /// Ring buffer of switch timestamps (microseconds).
-    switch_times: VecDeque<u64>,
+    /// (earliest possible time, observation time, counter delta). A batch is
+    /// counted only while its entire uncertainty interval is inside the window.
+    switch_times: VecDeque<(u64, u64, u32)>,
     /// Timestamps of switches that landed on a degraded instance. Trimmed to
     /// the same window as `switch_times` so "switched to degraded" is scoped
     /// to the current window, not the whole flight.
@@ -43,6 +44,8 @@ pub struct EkfSelectorWhipsawAnalyzer {
     /// Per-instance most recent combined_test_ratio.
     last_test_ratios: [f32; 9],
     last_detection_us: Option<u64>,
+    last_detection_critical: bool,
+    last_status_us: Option<u64>,
     /// Track whether this log even has multi-EKF (instances_available > 1).
     multi_ekf_active: bool,
     detections: Vec<Diagnostic>,
@@ -61,8 +64,10 @@ impl EkfSelectorWhipsawAnalyzer {
             degraded_switch_times: VecDeque::new(),
             last_instance_changed_count: None,
             last_primary_instance: None,
-            last_test_ratios: [0.0; 9],
+            last_test_ratios: [f32::NAN; 9],
             last_detection_us: None,
+            last_detection_critical: false,
+            last_status_us: None,
             multi_ekf_active: false,
             detections: Vec::new(),
         }
@@ -71,7 +76,7 @@ impl EkfSelectorWhipsawAnalyzer {
     fn trim_window(&mut self, now_us: u64) {
         let cutoff = now_us.saturating_sub(WINDOW_SIZE_US);
         while let Some(&front) = self.switch_times.front() {
-            if front < cutoff {
+            if front.0 < cutoff {
                 self.switch_times.pop_front();
             } else {
                 break;
@@ -106,86 +111,114 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
             return;
         }
 
-        let ts = data
-            .flattened_format
-            .timestamp_field
-            .as_ref()
-            .map(|tf| tf.parse_timestamp(data.data))
-            .unwrap_or(0);
+        let Some(ts) = super::timestamp(data) else {
+            return;
+        };
+        if self.last_status_us.is_some_and(|last| ts <= last) {
+            return;
+        }
+        let previous_ts = self.last_status_us.replace(ts);
 
         // Only relevant if multi-EKF is actually active
         if let Some(available) = parse_field::<u8>(data, "instances_available") {
-            if available > 1 {
-                self.multi_ekf_active = true;
-            }
+            self.multi_ekf_active = available > 1;
         }
 
         if !self.multi_ekf_active {
+            self.switch_times.clear();
+            self.degraded_switch_times.clear();
+            self.last_instance_changed_count = None;
+            self.last_detection_us = None;
             return;
         }
 
         // Update per-instance test ratios
         for i in 0..9 {
             let field = format!("combined_test_ratio[{i}]");
-            if let Some(ratio) = parse_field::<f32>(data, &field) {
-                if ratio.is_finite() {
-                    self.last_test_ratios[i as usize] = ratio;
-                }
-            }
+            self.last_test_ratios[i as usize] =
+                parse_field::<f32>(data, &field).unwrap_or(f32::NAN);
         }
 
         // Detect instance changes
         let current_count = parse_field::<u32>(data, "instance_changed_count");
-        let current_primary = parse_field::<u8>(data, "primary_instance");
+        let current_primary = parse_field::<u8>(data, "primary_instance").filter(|i| *i < 9);
 
         if let (Some(count), Some(primary)) = (current_count, current_primary) {
-            let switched = match self.last_instance_changed_count {
-                Some(prev) => count > prev,
-                None => false,
-            };
-
-            if switched {
-                self.switch_times.push_back(ts);
+            if self
+                .last_instance_changed_count
+                .is_some_and(|previous| count < previous)
+            {
+                // Counter reset/wrap: do not interpret it as billions of switches.
+                self.switch_times.clear();
+                self.degraded_switch_times.clear();
+                self.last_detection_us = None;
+            }
+            let delta = self
+                .last_instance_changed_count
+                .map(|previous| count.saturating_sub(previous))
+                .unwrap_or(0);
+            if delta > 0 {
+                let earliest = previous_ts.unwrap_or(ts);
+                self.switch_times.push_back((earliest, ts, delta));
 
                 // Record switches that land on a degraded instance (high
                 // combined_test_ratio) so the window can be evaluated for the
                 // #27013 signature. Stored by timestamp, not as a sticky flag,
                 // so it ages out of the window with the switch itself.
                 let idx = primary as usize;
-                if idx < 9 && self.last_test_ratios[idx] >= DEGRADED_TEST_RATIO {
-                    self.degraded_switch_times.push_back(ts);
+                if self.last_test_ratios[idx].is_finite()
+                    && self.last_test_ratios[idx] >= DEGRADED_TEST_RATIO
+                    && ts.saturating_sub(earliest) <= WINDOW_SIZE_US
+                {
+                    self.degraded_switch_times.push_back(earliest);
                 }
             }
 
             self.last_instance_changed_count = Some(count);
             self.last_primary_instance = Some(primary);
+        } else {
+            // Missing counter/primary cannot be used as the next interval's
+            // baseline: changes may have happened before that interval.
+            self.last_instance_changed_count = None;
         }
 
         self.trim_window(ts);
 
-        let switches_in_window = self.switch_times.len() as u32;
+        let switches_in_window = self
+            .switch_times
+            .iter()
+            .fold(0u32, |count, batch| count.saturating_add(batch.2));
+        let switched_to_degraded = !self.degraded_switch_times.is_empty();
+        let critical = switches_in_window >= CRITICAL_SWITCH_COUNT || switched_to_degraded;
 
         let dedup_ok = match self.last_detection_us {
-            Some(prev) => ts.saturating_sub(prev) >= DEDUP_INTERVAL_US,
+            Some(prev) => {
+                ts.saturating_sub(prev) >= DEDUP_INTERVAL_US
+                    || (critical && !self.last_detection_critical)
+            }
             None => true,
         };
 
         if switches_in_window >= WARNING_SWITCH_COUNT && dedup_ok {
             self.last_detection_us = Some(ts);
+            self.last_detection_critical = critical;
 
-            let window_start = *self.switch_times.front().unwrap_or(&ts);
+            let uncertain = self.switch_times.iter().any(|batch| batch.2 > 1);
+            let window_start = self
+                .switch_times
+                .front()
+                .map(|batch| if uncertain { batch.0 } else { batch.1 })
+                .unwrap_or(ts);
             let window_duration_us = ts.saturating_sub(window_start);
-            let avg_interval_ms = if switches_in_window > 1 {
-                (window_duration_us / (switches_in_window as u64 - 1)) as f64 / 1_000.0
+            let avg_interval_ms = if switches_in_window > 1 && !uncertain {
+                Some((window_duration_us / (switches_in_window as u64 - 1)) as f64 / 1_000.0)
             } else {
-                0.0
+                None
             };
 
             // Degraded only counts if a degraded switch falls within the
             // current window. `trim_window` above already aged out older ones.
-            let switched_to_degraded = !self.degraded_switch_times.is_empty();
-
-            let severity = if switches_in_window >= CRITICAL_SWITCH_COUNT || switched_to_degraded {
+            let severity = if critical {
                 Severity::Critical
             } else {
                 Severity::Warning
@@ -193,10 +226,16 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
 
             let primary_test_ratio = self
                 .last_primary_instance
-                .map(|i| self.last_test_ratios[i as usize])
-                .unwrap_or(0.0);
+                .and_then(|i| self.last_test_ratios.get(i as usize).copied())
+                .filter(|value| value.is_finite());
 
-            let summary = if switched_to_degraded {
+            let summary = if uncertain {
+                format!(
+                    "EKF2 selector counter increased by at least {} in {:.1}s; intermediate switch times unavailable{}",
+                    switches_in_window, window_duration_us as f64 / 1_000_000.0,
+                    if switched_to_degraded { "; observed switch to a degraded instance" } else { "" },
+                )
+            } else if switched_to_degraded {
                 format!(
                     "EKF2 estimator switching rapidly: {} instance switches \
                      in {:.1}s, switched to a degraded instance \
@@ -211,7 +250,7 @@ impl Analyzer for EkfSelectorWhipsawAnalyzer {
                      in {:.1}s (avg interval {:.0}ms)",
                     switches_in_window,
                     window_duration_us as f64 / 1_000_000.0,
-                    avg_interval_ms,
+                    avg_interval_ms.unwrap_or(0.0),
                 )
             };
 

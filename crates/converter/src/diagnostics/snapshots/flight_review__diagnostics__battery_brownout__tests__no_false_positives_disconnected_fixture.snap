@@ -1,0 +1,5 @@
+---
+source: crates/converter/src/diagnostics/battery_brownout.rs
+expression: diags
+---
+[]

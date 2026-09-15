@@ -5,7 +5,7 @@ expression: diags
 [
   {
     "id": "tecs_nonfinite_pitch",
-    "summary": "TECS pitch_integ became non-finite (NaN) at 1029.9s and never recovered — aircraft loses pitch control",
+    "summary": "TECS pitch_integ non-finite (NaN or infinity) observed from 1029.9s to 1035.3s",
     "severity": "critical",
     "kind": {
       "region": {

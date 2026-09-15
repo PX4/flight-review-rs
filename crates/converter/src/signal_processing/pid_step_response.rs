@@ -3,8 +3,13 @@
 //! Extracts the step response of the PID controller for each axis (roll,
 //! pitch, yaw) by deconvolving the rate setpoint (input) from the actual
 //! angular rate (output).
+//!
+//! Only broadband-excited, sufficiently sampled windows with predominantly
+//! causal, settling estimates are retained. These conservative heuristics can
+//! reject otherwise useful band-limited flights; they are not confidence scores
+//! or a substitute for a dedicated system-identification experiment.
 
-use super::dsp::{hanning_window, median_sample_rate, resample_uniform};
+use super::dsp::{hanning_window, median_sample_rate, resample_covered_window};
 use super::{AnalysisError, SignalAnalysis, SignalRequest, SignalStore};
 use rustfft::num_complex::Complex;
 use rustfft::FftPlanner;
@@ -21,7 +26,8 @@ pub struct PidStepResponse {
     pub window_count: usize,
     /// Time points for the step response (0 to ~0.5s)
     pub time_s: Vec<f64>,
-    /// Mean step response values (normalized, should approach 1.0)
+    /// Estimated output/input step gain, without endpoint normalization.
+    /// Screening is heuristic, not a calibrated confidence measure.
     pub mean_response: Vec<f64>,
     /// 2D histogram: time_bins x amplitude_bins -> count
     pub histogram: StepResponseHistogram,
@@ -50,6 +56,12 @@ const RESPONSE_DURATION_S: f64 = 0.5;
 const MIN_SAMPLE_RATE_HZ: f64 = 50.0;
 const MIN_WINDOWS: usize = 3;
 const NOISE_FLOOR_FACTOR: f64 = 1e-3;
+// A transfer curve is not identifiable from a constant or a few excited bins.
+// Require substantial excitation across the sampled bandwidth. These are
+// conservative screening thresholds, not statistical confidence bounds.
+const MIN_EXCITED_BIN_FRACTION: f64 = 0.25;
+const EXCITED_POWER_FRACTION: f64 = 0.01;
+const MAX_NONCAUSAL_ENERGY_FRACTION: f64 = 0.2;
 
 const HIST_TIME_BINS: usize = 100;
 const HIST_AMP_BINS: usize = 100;
@@ -130,8 +142,10 @@ fn analyze_axis(
         return None;
     }
 
-    let sample_rate = median_sample_rate(setpoint_raw);
-    if sample_rate < MIN_SAMPLE_RATE_HZ {
+    let setpoint_rate = median_sample_rate(setpoint_raw);
+    let gyro_rate = median_sample_rate(gyro_raw);
+    let sample_rate = setpoint_rate.min(gyro_rate);
+    if !sample_rate.is_finite() || sample_rate < MIN_SAMPLE_RATE_HZ * (1.0 - 1e-9) {
         return None;
     }
 
@@ -145,16 +159,6 @@ fn analyze_axis(
         return None;
     }
 
-    let setpoint = resample_uniform(setpoint_raw, sample_rate, t_start, t_end);
-    let gyro = resample_uniform(gyro_raw, sample_rate, t_start, t_end);
-
-    let n = setpoint.len().min(gyro.len());
-    if n < 2 {
-        return None;
-    }
-    let setpoint = &setpoint[..n];
-    let gyro = &gyro[..n];
-
     let window_samples = (WINDOW_DURATION_S * sample_rate).round() as usize;
     let step_samples = (STEP_DURATION_S * sample_rate).round() as usize;
     let response_samples = (RESPONSE_DURATION_S * sample_rate).round() as usize;
@@ -167,14 +171,23 @@ fn analyze_axis(
     let mut all_step_responses: Vec<Vec<f64>> = Vec::new();
 
     let mut offset = 0;
-    while offset + window_samples <= n {
-        let sp_win = &setpoint[offset..offset + window_samples];
-        let gy_win = &gyro[offset..offset + window_samples];
-
-        if let Some(step) =
-            wiener_step_response(sp_win, gy_win, &hann, window_samples, response_samples)
-        {
-            all_step_responses.push(step);
+    while t_start + (offset + window_samples - 1) as f64 / sample_rate <= t_end {
+        let start = t_start + offset as f64 / sample_rate;
+        if let (Some(sp_win), Some(gy_win)) = (
+            resample_covered_window(
+                setpoint_raw,
+                setpoint_rate,
+                sample_rate,
+                start,
+                window_samples,
+            ),
+            resample_covered_window(gyro_raw, gyro_rate, sample_rate, start, window_samples),
+        ) {
+            if let Some(step) =
+                wiener_step_response(&sp_win, &gy_win, &hann, window_samples, response_samples)
+            {
+                all_step_responses.push(step);
+            }
         }
 
         offset += step_samples;
@@ -232,15 +245,30 @@ fn wiener_step_response(
     fft_len: usize,
     response_len: usize,
 ) -> Option<Vec<f64>> {
+    if fft_len < 4
+        || input.len() != fft_len
+        || output.len() != fft_len
+        || hann.len() != fft_len
+        || response_len == 0
+        || input
+            .iter()
+            .chain(output)
+            .chain(hann)
+            .any(|v| !v.is_finite())
+    {
+        return None;
+    }
+    let input_mean = input.iter().sum::<f64>() / input.len() as f64;
+    let output_mean = output.iter().sum::<f64>() / output.len() as f64;
     let mut x: Vec<Complex<f64>> = input
         .iter()
         .zip(hann.iter())
-        .map(|(&s, &w)| Complex::new(s * w, 0.0))
+        .map(|(&s, &w)| Complex::new((s - input_mean) * w, 0.0))
         .collect();
     let mut y: Vec<Complex<f64>> = output
         .iter()
         .zip(hann.iter())
-        .map(|(&s, &w)| Complex::new(s * w, 0.0))
+        .map(|(&s, &w)| Complex::new((s - output_mean) * w, 0.0))
         .collect();
 
     x.resize(fft_len, Complex::new(0.0, 0.0));
@@ -257,6 +285,24 @@ fn wiener_step_response(
     }
     let noise_floor = max_power * NOISE_FLOOR_FACTOR;
 
+    let positive_power: Vec<f64> = x[1..=fft_len / 2].iter().map(|c| c.norm_sqr()).collect();
+    let excited = |p: &&f64| **p >= max_power * EXCITED_POWER_FRACTION;
+    // The low-frequency gain is essential to a step curve; broadband power
+    // elsewhere cannot compensate for a DC estimate dominated by regularization.
+    if x[0].norm_sqr() < max_power * EXCITED_POWER_FRACTION
+        || (positive_power.iter().filter(excited).count() as f64)
+            < positive_power.len() as f64 * MIN_EXCITED_BIN_FRACTION
+        || positive_power
+            .chunks(positive_power.len().div_ceil(4))
+            .any(|band| {
+                !band
+                    .iter()
+                    .any(|p| *p >= max_power * EXCITED_POWER_FRACTION)
+            })
+    {
+        return None;
+    }
+
     let mut h: Vec<Complex<f64>> = y
         .iter()
         .zip(x.iter())
@@ -270,24 +316,33 @@ fn wiener_step_response(
     ifft.process(&mut h);
 
     let scale = 1.0 / fft_len as f64;
+    let total_energy = h.iter().map(|v| v.norm_sqr()).sum::<f64>();
+    let noncausal_energy = h[fft_len / 2..].iter().map(|v| v.norm_sqr()).sum::<f64>();
+    if !total_energy.is_finite()
+        || total_energy < 1e-30
+        || noncausal_energy > total_energy * MAX_NONCAUSAL_ENERGY_FRACTION
+    {
+        return None;
+    }
 
     let resp_len = response_len.min(fft_len);
     let mut step = Vec::with_capacity(resp_len);
     let mut cumsum = 0.0;
     for item in h.iter().take(resp_len) {
         let impulse_val = item.re * scale;
-        if impulse_val.is_finite() {
-            cumsum += impulse_val;
+        if !impulse_val.is_finite() {
+            return None;
         }
+        cumsum += impulse_val;
         step.push(cumsum);
     }
 
-    let final_val = *step.last().unwrap_or(&0.0);
-    if final_val.abs() < 1e-10 {
+    let peak = step.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+    let tail = &step[step.len() * 4 / 5..];
+    let tail_min = tail.iter().copied().fold(f64::INFINITY, f64::min);
+    let tail_max = tail.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+    if !peak.is_finite() || peak < 1e-10 || tail_max - tail_min > 0.2 * peak {
         return None;
-    }
-    for v in &mut step {
-        *v /= final_val;
     }
 
     Some(step)
@@ -350,58 +405,294 @@ mod tests {
     use crate::signal_processing::testing;
 
     #[test]
-    fn test_pid_analysis_sample() {
-        let result = testing::analyze_fixture_for("sample.ulg", "pid_step_response");
-        // sample.ulg may not have vehicle_angular_velocity, so PID analysis
-        // may return InsufficientData (None here). That's valid.
-        let Some(value) = result else {
-            return;
-        };
+    fn sample_without_modern_gyro_is_explicitly_insufficient() {
+        assert!(testing::analyze_fixture_for("sample.ulg", "pid_step_response").is_none());
+    }
 
-        let parsed: PidAnalysisResult = serde_json::from_value(value).unwrap();
-
-        for axis_result in &parsed.axes {
-            assert!(
-                axis_result.sample_rate_hz >= MIN_SAMPLE_RATE_HZ,
-                "sample rate should be above minimum"
-            );
-            assert!(
-                axis_result.window_count >= MIN_WINDOWS,
-                "should have enough windows"
-            );
-            assert!(!axis_result.time_s.is_empty());
-            assert_eq!(axis_result.time_s.len(), axis_result.mean_response.len());
-            assert_eq!(axis_result.histogram.time_bins.len(), HIST_TIME_BINS);
-            assert_eq!(axis_result.histogram.amplitude_bins.len(), HIST_AMP_BINS);
-            assert_eq!(
-                axis_result.histogram.counts.len(),
-                HIST_TIME_BINS * HIST_AMP_BINS
-            );
+    #[test]
+    fn narrowband_and_constant_are_not_identifiable() {
+        let n = 128;
+        for signal in [
+            vec![1.0; n],
+            vec![0.0; n],
+            (0..n).map(|i| (i as f64 * 0.1).sin()).collect(),
+            (0..n).map(|i| 10.0 + (i as f64 * 0.1).sin()).collect(),
+        ] {
+            assert!(wiener_step_response(&signal, &signal, &hanning_window(n), n, n / 2).is_none());
         }
     }
 
     #[test]
-    fn test_pid_analysis_fixed_wing() {
-        let result = testing::analyze_fixture_for("fixed_wing_gps.ulg", "pid_step_response");
-        // May or may not produce a result depending on log content
-        if let Some(value) = result {
-            let parsed: PidAnalysisResult = serde_json::from_value(value).unwrap();
-            for axis_result in &parsed.axes {
-                assert!(axis_result.window_count >= MIN_WINDOWS);
-                assert!(!axis_result.mean_response.is_empty());
+    fn broadband_identity_preserves_the_entire_gain_curve() {
+        let n = 128;
+        let signal = testing::broadband(n);
+        for gain in [0.5, 1.0, 2.0] {
+            let output: Vec<_> = signal.iter().map(|v| gain * v).collect();
+            let response = wiener_step_response(&signal, &output, &hanning_window(n), n, n / 2)
+                .expect("broadband identity must be identifiable");
+            assert_eq!(response.len(), n / 2);
+            for (i, value) in response.iter().enumerate() {
+                assert!(
+                    (value - gain).abs() < 0.08 * gain,
+                    "sample {i}: {value}, gain {gain}"
+                );
             }
         }
     }
 
     #[test]
-    fn test_wiener_step_response_identity() {
+    fn broadband_without_low_frequency_gain_is_not_identifiable() {
         let n = 128;
         let hann = hanning_window(n);
-        let signal: Vec<f64> = (0..n).map(|i| (i as f64 * 0.1).sin()).collect();
-        let resp = wiener_step_response(&signal, &signal, &hann, n, n / 2);
-        if let Some(r) = resp {
-            assert!(!r.is_empty());
-            assert!((r.last().unwrap() - 1.0).abs() < 1e-6);
+        let mut signal = testing::broadband(n);
+        let centered_hann: Vec<_> = hann.iter().map(|w| w - 0.5).collect();
+        let projection = signal
+            .iter()
+            .zip(&centered_hann)
+            .map(|(x, w)| x * w)
+            .sum::<f64>()
+            / centered_hann.iter().map(|w| w * w).sum::<f64>();
+        for (x, w) in signal.iter_mut().zip(centered_hann) {
+            *x -= projection * w;
+        }
+        assert!(wiener_step_response(&signal, &signal, &hann, n, n / 2).is_none());
+    }
+
+    fn samples(signal: &[f64], rate: usize) -> Vec<(u64, [f32; 3])> {
+        signal
+            .iter()
+            .enumerate()
+            .map(|(i, value)| {
+                (
+                    1_000_000 + i as u64 * 1_000_000 / rate as u64,
+                    [*value as f32; 3],
+                )
+            })
+            .collect()
+    }
+
+    fn first_order(input: &[f64], rate: f64) -> Vec<f64> {
+        let pole = (-1.0 / (rate * 0.05)).exp();
+        let mut state = 0.0;
+        input
+            .iter()
+            .map(|value| {
+                state = pole * state + (1.0 - pole) * value;
+                state
+            })
+            .collect()
+    }
+
+    #[test]
+    fn modern_ulog_identity_and_50ms_first_order_full_curves() {
+        for rate in [50, 100, 250] {
+            let input = testing::broadband(rate * 12);
+            for filtered in [false, true] {
+                let output = if filtered {
+                    first_order(&input, rate as f64)
+                } else {
+                    input.clone()
+                };
+                let log =
+                    testing::PidLog::new(&samples(&input, rate), &samples(&output, rate), &[]);
+                let value = log
+                    .analyze()
+                    .remove("pid_step_response")
+                    .expect("known system must produce PID output");
+                let result: PidAnalysisResult = serde_json::from_value(value).unwrap();
+                assert_eq!(result.axes.len(), 3);
+                for axis in result.axes {
+                    assert!(axis.window_count >= 10, "{}", axis.window_count);
+                    assert!((axis.sample_rate_hz - rate as f64).abs() < 0.01);
+                    assert_eq!(axis.time_s.len(), rate / 2);
+                    assert_eq!(axis.mean_response.len(), axis.time_s.len());
+                    let mut squared_error = 0.0;
+                    for (i, (&time, &value)) in
+                        axis.time_s.iter().zip(&axis.mean_response).enumerate()
+                    {
+                        let expected = if filtered {
+                            1.0 - (-(time + 1.0 / rate as f64) / 0.05).exp()
+                        } else {
+                            1.0
+                        };
+                        squared_error += (value - expected).powi(2);
+                        let tolerance = if filtered { 0.12 } else { 0.05 };
+                        assert!((value - expected).abs() < tolerance,
+                            "rate {rate}, filtered {filtered}, sample {i}: {value}, expected {expected}");
+                    }
+                    let rmse = (squared_error / axis.time_s.len() as f64).sqrt();
+                    assert!(rmse < 0.08, "rate {rate}, filtered {filtered}, RMSE {rmse}");
+                    assert_eq!(axis.histogram.time_bins.len(), HIST_TIME_BINS);
+                    assert_eq!(axis.histogram.amplitude_bins.len(), HIST_AMP_BINS);
+                    assert_eq!(axis.histogram.counts.len(), HIST_TIME_BINS * HIST_AMP_BINS);
+                    assert!(axis.histogram.counts.iter().sum::<u32>() > 0);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn both_streams_require_rate_order_and_coverage() {
+        let good = samples(&testing::broadband(301), 100);
+        let mut backwards = good.clone();
+        backwards.swap(50, 51);
+        let mut conflicting_duplicate = good.clone();
+        conflicting_duplicate[51].0 = conflicting_duplicate[50].0;
+        let mut missing = good.clone();
+        for sample in &mut missing[50..251] {
+            sample.1 = [f32::NAN; 3];
+        }
+        let bad_streams = [
+            Vec::new(),
+            vec![good[0], *good.last().unwrap()],
+            samples(&vec![0.0; good.len()], 100),
+            good.iter().step_by(5).copied().collect(),
+            good.iter()
+                .copied()
+                .filter(|p| p.0 < 1_500_000 || p.0 > 3_500_000)
+                .collect(),
+            backwards,
+            conflicting_duplicate,
+            missing,
+        ];
+        for (case, bad) in bad_streams.iter().enumerate() {
+            for (sp, gy) in [(bad, &good), (&good, bad)] {
+                assert!(
+                    testing::PidLog::new(sp, gy, &[]).analyze().is_empty(),
+                    "case {case}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gaps_discard_only_affected_windows() {
+        let input = testing::broadband(1001);
+        let good = samples(&input, 100);
+        let gapped: Vec<_> = good
+            .iter()
+            .copied()
+            .filter(|p| p.0 < 5_000_000 || p.0 > 7_000_000)
+            .collect();
+        let baseline: PidAnalysisResult = serde_json::from_value(
+            testing::PidLog::new(&good, &good, &[])
+                .analyze()
+                .remove("pid_step_response")
+                .unwrap(),
+        )
+        .unwrap();
+        for (sp, gy) in [(&good, &gapped), (&gapped, &good)] {
+            let result: PidAnalysisResult = serde_json::from_value(
+                testing::PidLog::new(sp, gy, &[])
+                    .analyze()
+                    .remove("pid_step_response")
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(result.axes.len(), 3);
+            for axis in result.axes {
+                assert!(
+                    axis.window_count >= MIN_WINDOWS
+                        && axis.window_count <= 14
+                        && axis.window_count < baseline.axes[0].window_count,
+                    "{}",
+                    axis.window_count
+                );
+                assert!(axis.mean_response.iter().all(|v| (v - 1.0).abs() < 0.12));
+            }
+        }
+    }
+
+    #[test]
+    fn extraction_selects_instances_and_collapses_only_identical_duplicates() {
+        let good = samples(&testing::broadband(501), 100);
+        let duplicate: Vec<_> = good.iter().flat_map(|p| [*p, *p]).collect();
+        let other = samples(&vec![99.0; good.len()], 100);
+        let log = testing::PidLog::new(&duplicate, &duplicate, &other);
+        let default = SignalRequest::new("vehicle_angular_velocity", "xyz[0]");
+        let secondary = default.clone().with_instance(1);
+        let missing = SignalRequest::new("vehicle_angular_velocity", "missing_field");
+        let store = crate::signal_processing::extract_signals(
+            log.path.to_str().unwrap(),
+            &[default.clone(), secondary.clone(), missing.clone()]
+                .into_iter()
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(store.get(&default).len(), good.len());
+        assert_eq!(store.get(&secondary).len(), other.len());
+        assert!(store.get(&secondary).iter().all(|p| p.1 == 99.0));
+        assert_eq!(store.get(&missing).len(), good.len());
+        assert!(store.get(&missing).iter().all(|p| p.1.is_nan()));
+        assert_eq!(log.analyze().len(), 1);
+        assert!(testing::PidLog::new(&good, &[], &good).analyze().is_empty());
+    }
+
+    #[test]
+    fn unequal_source_rates_use_the_slower_qualified_grid() {
+        let signal = testing::broadband(601);
+        let coarse = samples(&signal, 100);
+        let interpolated: Vec<_> = signal
+            .windows(2)
+            .flat_map(|pair| [pair[0], (pair[0] + pair[1]) / 2.0])
+            .collect();
+        let fine = samples(&interpolated, 200);
+        for (sp, gy) in [(&coarse, &fine), (&fine, &coarse)] {
+            let result: PidAnalysisResult = serde_json::from_value(
+                testing::PidLog::new(sp, gy, &[])
+                    .analyze()
+                    .remove("pid_step_response")
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(result.axes.len(), 3);
+            for axis in result.axes {
+                assert!((axis.sample_rate_hz - 100.0).abs() < 0.01);
+                assert!(axis.mean_response.iter().all(|v| (v - 1.0).abs() < 0.05));
+            }
+        }
+    }
+
+    #[test]
+    fn pipeline_rejects_constant_and_narrowband_inputs() {
+        for signal in [
+            vec![1.0; 501],
+            (0..501).map(|i| (i as f64 * 0.1).sin()).collect(),
+        ] {
+            let stream = samples(&signal, 100);
+            assert!(testing::PidLog::new(&stream, &stream, &[])
+                .analyze()
+                .is_empty());
+        }
+    }
+
+    #[test]
+    fn noncausal_and_unrelated_outputs_are_rejected() {
+        let n = 256;
+        let signal = testing::broadband(n * 2);
+        let advanced: Vec<_> = (0..n).map(|i| signal[(i + 20) % n]).collect();
+        for output in [&advanced[..], &signal[n..]] {
+            assert!(
+                wiener_step_response(&signal[..n], output, &hanning_window(n), n, n / 2).is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_fft_inputs_are_rejected() {
+        let good = testing::broadband(128);
+        let mut nonfinite = good.clone();
+        nonfinite[10] = f64::NAN;
+        let hann = hanning_window(128);
+        for (input, output, window, n, response_len) in [
+            (&good[..127], &good[..], &hann[..], 128, 64),
+            (&good[..], &good[..127], &hann[..], 128, 64),
+            (&good[..], &good[..], &hann[..127], 128, 64),
+            (&nonfinite[..], &good[..], &hann[..], 128, 64),
+            (&good[..], &nonfinite[..], &hann[..], 128, 64),
+            (&good[..], &good[..], &hann[..], 128, 0),
+        ] {
+            assert!(wiener_step_response(input, output, window, n, response_len).is_none());
         }
     }
 

@@ -1,4 +1,8 @@
-//! GPS interference detection analyzer.
+//! GPS quality degradation (legacy ID: gps_interference).
+//! Accuracy/satellite changes do not identify interference as their cause.
+//!
+//! NEGATIVE_FIXTURE: gps_interference.ulg has no fix throughout, not an observed
+//! good-to-bad transition. A labeled positive degradation fixture is needed.
 //!
 //! Monitors `vehicle_gps_position` for sudden degradation in GPS quality:
 //! - EPH (horizontal position error) spikes above baseline
@@ -34,7 +38,8 @@ pub struct GpsInterferenceAnalyzer {
     baseline_eph: Option<f32>,
     baseline_sats: Option<f64>,
     // Deduplication
-    last_detection_us: u64,
+    last_detection_us: Option<u64>,
+    last_sample_us: Option<u64>,
     detections: Vec<Diagnostic>,
 }
 
@@ -52,7 +57,8 @@ impl GpsInterferenceAnalyzer {
             sats_sum: 0.0,
             baseline_eph: None,
             baseline_sats: None,
-            last_detection_us: 0,
+            last_detection_us: None,
+            last_sample_us: None,
             detections: Vec::new(),
         }
     }
@@ -77,27 +83,37 @@ impl Analyzer for GpsInterferenceAnalyzer {
             return;
         }
 
-        let ts = data
-            .flattened_format
-            .timestamp_field
-            .as_ref()
-            .map(|tf| tf.parse_timestamp(data.data))
-            .unwrap_or(0);
-
-        let eph = parse_field::<f32>(data, "eph");
-        let epv = parse_field::<f32>(data, "epv");
-        let sats = parse_field::<u8>(data, "satellites_used").map(|s| s as u16);
+        let Some(ts) = super::timestamp(data) else {
+            return;
+        };
+        if self.last_sample_us.is_some_and(|previous| ts <= previous) {
+            return;
+        }
+        self.last_sample_us = Some(ts);
+        let (Some(current_eph), Some(current_epv), Some(current_sats)) = (
+            parse_field::<f32>(data, "eph").filter(|v| v.is_finite() && *v >= 0.0),
+            parse_field::<f32>(data, "epv").filter(|v| v.is_finite() && *v >= 0.0),
+            parse_field::<u8>(data, "satellites_used").map(u16::from),
+        ) else {
+            return;
+        };
+        let fix_valid = parse_field::<u8>(data, "fix_type").is_none_or(|fix| fix >= 3);
 
         // Accumulate baseline from first N samples
         if self.sample_count < BASELINE_SAMPLES {
-            if let Some(e) = eph {
-                if e.is_finite() {
-                    self.eph_sum += e as f64;
-                }
+            if !fix_valid
+                || current_sats < SATS_CRITICAL_MIN
+                || current_eph <= 0.0
+                || current_epv <= 0.0
+            {
+                // Establish a baseline only from consecutive usable fixes.
+                self.sample_count = 0;
+                self.eph_sum = 0.0;
+                self.sats_sum = 0.0;
+                return;
             }
-            if let Some(s) = sats {
-                self.sats_sum += s as f64;
-            }
+            self.eph_sum += current_eph as f64;
+            self.sats_sum += current_sats as f64;
             self.sample_count += 1;
 
             if self.sample_count == BASELINE_SAMPLES {
@@ -115,17 +131,15 @@ impl Analyzer for GpsInterferenceAnalyzer {
         let baseline_sats = self.baseline_sats.unwrap_or(0.0);
 
         // Deduplication check
-        if ts > 0 && ts - self.last_detection_us < DEDUP_INTERVAL_US {
+        if self
+            .last_detection_us
+            .is_some_and(|last| ts.saturating_sub(last) < DEDUP_INTERVAL_US)
+        {
             return;
         }
 
-        let current_eph = eph.unwrap_or(0.0);
-        let current_epv = epv.unwrap_or(0.0);
-        let current_sats = sats.unwrap_or(0);
-
         // EPH spike detection
-        let eph_spike =
-            baseline_eph < 2.0 && current_eph > EPH_SPIKE_THRESHOLD && current_eph.is_finite();
+        let eph_spike = current_eph > EPH_SPIKE_THRESHOLD && current_eph > 3.0 * baseline_eph;
         // EPV spike detection
         let epv_spike = current_epv > EPV_THRESHOLD && current_epv.is_finite();
         // Satellite drop detection
@@ -157,7 +171,7 @@ impl Analyzer for GpsInterferenceAnalyzer {
                 ));
             }
 
-            self.last_detection_us = ts;
+            self.last_detection_us = Some(ts);
             self.detections.push(Diagnostic {
                 id: "gps_interference".to_string(),
                 summary: format!(
@@ -346,16 +360,11 @@ mod tests {
     }
 
     #[test]
-    fn detects_real_gps_interference() {
+    fn no_false_positives_no_fix_fixture() {
         let diags = analyze_fixture_for("gps_interference.ulg", "gps_interference");
-        assert!(
-            !diags.is_empty(),
-            "Should detect GPS interference in real log"
-        );
-        assert!(
-            diags.iter().any(|d| d.severity == Severity::Critical),
-            "Should have at least one critical GPS event"
-        );
+        // Every sample has fix_type=0 and satellites_used=0. It cannot
+        // establish a valid baseline or prove interference caused a loss.
+        assert!(diags.is_empty());
         insta::assert_json_snapshot!(diags);
     }
 }

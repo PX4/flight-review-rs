@@ -1,9 +1,9 @@
 //! EKF failure detection analyzer.
 //!
 //! Monitors `estimator_status` for innovation test ratios exceeding their
-//! bounds. When a test ratio stays above 1.0 for a sustained period, the
-//! EKF is failing to converge and the position/velocity estimates are
-//! unreliable.
+//! bounds. Sustained ratios above 1.0 indicate innovation inconsistency, not
+//! proof that the selected vehicle estimate has failed. Factory dispatch keeps
+//! each estimator instance separate and identifies its source in the anchor.
 
 use super::{
     parse_field, Analyzer, AnomalyKind, Diagnostic, Evidence, FieldUnit, OutputDescriptor,
@@ -25,6 +25,7 @@ struct InnovationTracker {
     exceeded_since: Option<u64>,
     warning_fired: bool,
     critical_fired: bool,
+    last_update_us: Option<u64>,
 }
 
 impl InnovationTracker {
@@ -35,6 +36,7 @@ impl InnovationTracker {
             exceeded_since: None,
             warning_fired: false,
             critical_fired: false,
+            last_update_us: None,
         }
     }
 
@@ -45,6 +47,19 @@ impl InnovationTracker {
         descriptor: &OutputDescriptor,
         detections: &mut Vec<Diagnostic>,
     ) {
+        if self.last_update_us.is_some_and(|last| ts <= last) {
+            return;
+        }
+        if !ratio.is_finite()
+            || self
+                .last_update_us
+                .is_some_and(|last| ts - last > 1_000_000)
+        {
+            self.exceeded_since = None;
+            self.warning_fired = false;
+            self.critical_fired = false;
+        }
+        self.last_update_us = Some(ts);
         if !ratio.is_finite() {
             return;
         }
@@ -166,9 +181,8 @@ impl Analyzer for EkfFailureAnalyzer {
 
         let descriptor = self.output_descriptor();
         for tracker in &mut self.trackers {
-            if let Some(ratio) = parse_field::<f32>(data, tracker.field_name) {
-                tracker.update(ts, ratio, &descriptor, &mut self.detections);
-            }
+            let ratio = parse_field::<f32>(data, tracker.field_name).unwrap_or(f32::NAN);
+            tracker.update(ts, ratio, &descriptor, &mut self.detections);
         }
     }
 

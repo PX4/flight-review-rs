@@ -6,9 +6,9 @@
 # Checks for each analyzer file:
 #   1. Implements id() and description() on the Analyzer trait
 #   2. Has a corresponding test fixture .ulg in tests/fixtures/
-#   3. Has required test categories:
+#   3. Has required test categories (runtime tests verify their actual behavior):
 #      - no_false_positives (sample.ulg)
-#      - real-world fixture test (detects_real_*)
+#      - positive fixture test (detects_real_*) or documented negative fixture
 #      - handles_missing_fields
 #      - snapshot test
 #   4. Is registered in create_analyzers() factory
@@ -16,7 +16,8 @@
 #   6. Implements output_descriptor()
 #
 # Usage: scripts/ci/check-analyzer.sh [--changed-only]
-#   --changed-only: only check analyzers modified in the current PR
+#   --changed-only: compatibility alias; all analyzers are checked because
+#                   shared helpers, fixtures and factory changes affect them too.
 
 set -euo pipefail
 
@@ -32,38 +33,12 @@ err() { echo "ERROR: $1"; errors=$((errors + 1)); }
 warn() { echo "WARN:  $1"; warnings=$((warnings + 1)); }
 ok() { echo "OK:    $1"; }
 
-# Determine which analyzer files to check
-if [[ "${1:-}" == "--changed-only" ]]; then
-    # Get files changed in this PR vs main
-    changed_files=$(git diff --name-only origin/main...HEAD -- "$DIAG_DIR/" 2>/dev/null || \
-                    git diff --name-only HEAD~1 -- "$DIAG_DIR/" 2>/dev/null || echo "")
-
-    # Extract unique analyzer names from changed paths.
-    # `grep -v` exits 1 when nothing matches (e.g. only a snapshot or fixture
-    # changed, so sed produced no analyzer names); under `set -e` + `pipefail`
-    # that would abort the whole script before the "nothing changed" check
-    # below. `|| true` keeps an empty result from failing the pipeline.
-    analyzer_names=$(echo "$changed_files" \
-        | sed -n 's|^crates/converter/src/diagnostics/\([^/.]*\)\.rs$|\1|p' \
-        | { grep -v -E '^(mod|testing)$' || true; } \
-        | sort -u)
-
-    analyzer_files=""
-    for name in $analyzer_names; do
-        [[ -f "$DIAG_DIR/${name}.rs" ]] && analyzer_files="$analyzer_files $DIAG_DIR/${name}.rs"
-    done
-
-    if [[ -z "$analyzer_files" ]]; then
-        echo "No analyzer files changed. Skipping checks."
-        exit 0
-    fi
-else
-    # Find all analyzer .rs files (excluding mod.rs, testing.rs)
-    analyzer_files=$(find "$DIAG_DIR" -maxdepth 1 -name "*.rs" \
-        ! -name "mod.rs" \
-        ! -name "testing.rs" \
-        | sort)
+if [[ -n "${1:-}" && "$1" != "--changed-only" ]]; then
+    echo "Usage: $0 [--changed-only]" >&2
+    exit 2
 fi
+analyzer_files=$(find "$DIAG_DIR" -maxdepth 1 -name "*.rs" \
+    ! -name "mod.rs" ! -name "testing.rs" | sort)
 
 echo "Checking diagnostic analyzers..."
 echo
@@ -107,6 +82,10 @@ for analyzer_file in $analyzer_files; do
 
     if grep -q 'detects_real_' "$analyzer_file"; then
         ok "has real-world fixture test"
+    elif grep -q 'NEGATIVE_FIXTURE:' "$analyzer_file" \
+        && grep -q 'fn no_false_positives_.*fixture' "$analyzer_file" \
+        && [[ -f "$fixture" ]]; then
+        warn "$name: documented negative fixture; labeled positive fixture still needed"
     elif grep -q 'SKIP_FIXTURE' "$analyzer_file"; then
         warn "$name: no real-world test (SKIP_FIXTURE documented)"
     else

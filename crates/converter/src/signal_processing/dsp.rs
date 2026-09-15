@@ -7,10 +7,13 @@ use std::f64::consts::PI;
 
 /// Compute the median sample rate from a non-uniform time series.
 ///
-/// Returns 0.0 if the time series has fewer than 2 points or all
-/// intervals are zero.
+/// Returns 0.0 for fewer than two points, nonfinite timestamps, duplicates,
+/// or backwards timestamps. Callers must not sort away clock resets.
 pub fn median_sample_rate(data: &[(f64, f64)]) -> f64 {
-    if data.len() < 2 {
+    if data.len() < 2
+        || data.iter().any(|p| !p.0.is_finite())
+        || data.windows(2).any(|w| w[1].0 <= w[0].0)
+    {
         return 0.0;
     }
     let mut dts: Vec<f64> = data
@@ -30,6 +33,44 @@ pub fn median_sample_rate(data: &[(f64, f64)]) -> f64 {
     }
 }
 
+/// Resample only fully covered windows. Missing values invalidate a window;
+/// gaps exceeding 2.5 nominal periods and local rates below 80% of the nominal
+/// rate are not evidence of a continuously sampled signal.
+/// The caller must first validate timestamp ordering with `median_sample_rate`.
+pub(super) fn resample_covered_window(
+    data: &[(f64, f64)],
+    source_rate: f64,
+    target_rate: f64,
+    t_start: f64,
+    samples: usize,
+) -> Option<Vec<f64>> {
+    if samples < 2
+        || !source_rate.is_finite()
+        || !target_rate.is_finite()
+        || !t_start.is_finite()
+        || source_rate <= 0.0
+        || target_rate <= 0.0
+    {
+        return None;
+    }
+    let t_end = t_start + (samples - 1) as f64 / target_rate;
+    let start = data.partition_point(|p| p.0 <= t_start).checked_sub(1)?;
+    let end = data.partition_point(|p| p.0 < t_end);
+    let covered = data.get(start..=end)?;
+    if covered.iter().any(|p| !p.0.is_finite() || !p.1.is_finite())
+        || covered
+            .windows(2)
+            .any(|w| w[1].0 <= w[0].0 || w[1].0 - w[0].0 > 2.5 / source_rate)
+        || ((covered.len() - 1) as f64) < (t_end - t_start) * source_rate * 0.8
+    {
+        return None;
+    }
+    // A half-sample margin avoids floor rounding dropping the final grid point.
+    let mut result = resample_uniform(covered, target_rate, t_start, t_end + 0.5 / target_rate);
+    result.truncate(samples);
+    (result.len() == samples).then_some(result)
+}
+
 /// Resample non-uniform (time, value) data to a uniform grid via linear interpolation.
 ///
 /// Creates a uniform time grid from `t_start` to `t_end` at the given
@@ -41,6 +82,15 @@ pub fn resample_uniform(
     t_start: f64,
     t_end: f64,
 ) -> Vec<f64> {
+    if data.is_empty()
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !t_start.is_finite()
+        || !t_end.is_finite()
+        || t_end < t_start
+    {
+        return Vec::new();
+    }
     let dt = 1.0 / sample_rate;
     let n = ((t_end - t_start) / dt).floor() as usize + 1;
     let mut result = Vec::with_capacity(n);
@@ -116,5 +166,32 @@ mod tests {
     fn test_median_sample_rate_empty() {
         assert_eq!(median_sample_rate(&[]), 0.0);
         assert_eq!(median_sample_rate(&[(0.0, 1.0)]), 0.0);
+    }
+
+    #[test]
+    fn rates_reject_clock_resets_duplicates_and_nonfinite_time() {
+        for timestamps in [
+            [0.0, 0.01, 0.005],
+            [0.0, 0.01, 0.01],
+            [0.0, f64::NAN, 0.02],
+            [0.0, 0.01, f64::INFINITY],
+        ] {
+            assert_eq!(median_sample_rate(&timestamps.map(|t| (t, 1.0))), 0.0);
+        }
+    }
+
+    #[test]
+    fn covered_windows_require_brackets_finite_values_and_local_density() {
+        let good: Vec<_> = (0..301).map(|i| (i as f64 / 100.0, i as f64)).collect();
+        assert!(resample_covered_window(&good, 100.0, 100.0, 0.5, 100).is_some());
+        assert!(resample_covered_window(&good, 100.0, 100.0, -0.01, 100).is_none());
+        assert!(resample_covered_window(&good, 100.0, 100.0, 2.5, 100).is_none());
+        let sparse: Vec<_> = good.iter().step_by(2).copied().collect();
+        // No individually large gap, but only half the required window density.
+        assert!(resample_covered_window(&sparse, 100.0, 100.0, 0.5, 100).is_none());
+        let mut missing = good.clone();
+        missing[100].1 = f64::NAN;
+        assert!(resample_covered_window(&missing, 100.0, 100.0, 0.5, 100).is_none());
+        assert!(resample_covered_window(&missing, 100.0, 100.0, 1.5, 100).is_some());
     }
 }

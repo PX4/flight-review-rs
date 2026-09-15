@@ -13,8 +13,9 @@
 //! 4. Register it in [`create_analyzers()`]
 //! 5. Add tests following the required pattern in [`testing`]
 
-use px4_ulog::stream_parser::model::{DataMessage, ParseableFieldType};
+use px4_ulog::stream_parser::model::{DataMessage, FlattenedFormat, MultiId, ParseableFieldType};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, VecDeque};
 
 pub mod battery_brownout;
 pub mod ekf_failure;
@@ -28,7 +29,7 @@ pub mod testing;
 
 /// Current analysis version. Bump when the analyzer set changes to trigger
 /// reprocessing of historical logs.
-pub const ANALYSIS_VERSION: u32 = 3;
+pub const ANALYSIS_VERSION: u32 = 4;
 
 /// Whether a diagnostic marks an instant or spans a time window.
 ///
@@ -51,6 +52,9 @@ pub enum AnomalyKind {
 pub struct PlotAnchor {
     pub topic: String,
     pub field: String,
+    /// ULog multi_id. Omitted for the default instance (zero).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<u8>,
 }
 
 impl PlotAnchor {
@@ -58,6 +62,7 @@ impl PlotAnchor {
         Self {
             topic: topic.to_string(),
             field: field.to_string(),
+            instance: None,
         }
     }
 }
@@ -75,6 +80,8 @@ pub enum FieldUnit {
     Microseconds,
     Milliseconds,
     Pwm,
+    /// Driver-specific actuator command units, not measured motor speed.
+    ActuatorOutput,
     Ratio,
     Count,
     /// Free-form string field (flight mode, innovation name, etc.).
@@ -126,7 +133,7 @@ pub enum Severity {
     Info,
     /// Warning — potential issue, worth investigating.
     Warning,
-    /// Critical — likely hardware failure or dangerous condition.
+    /// Critical — a severe observed anomaly, not proof of a physical cause.
     Critical,
 }
 
@@ -135,6 +142,7 @@ pub enum Severity {
 #[serde(rename_all = "snake_case")]
 pub enum MotorFailureMode {
     DropToZero,
+    /// Legacy output. No longer inferred without driver-specific output limits.
     LockedAtMax,
 }
 
@@ -158,7 +166,9 @@ pub enum TecsNonfinitePitchField {
 #[serde(tag = "type")]
 pub enum Evidence {
     MotorFailure {
+        /// Legacy name: this is an actuator output channel, not a motor identity.
         motor_index: u8,
+        /// Legacy name: value is in the output driver's natural units.
         pwm_value: f32,
         mode: MotorFailureMode,
         flight_mode: String,
@@ -189,14 +199,15 @@ pub enum Evidence {
         switch_count: u32,
         /// Duration of the detection window (milliseconds).
         window_duration_ms: u64,
-        /// Average time between switches in the window (milliseconds).
-        avg_switch_interval_ms: f64,
+        /// Average interval between observed switch updates; unavailable when
+        /// counter jumps hide intermediate switch times.
+        avg_switch_interval_ms: Option<f64>,
         /// True if the selector switched to an instance with a high
         /// combined_test_ratio (indicating switching to a degraded instance).
         /// This is the #27013 signature.
         switched_to_degraded: bool,
         /// combined_test_ratio of the primary instance at detection time.
-        primary_instance_test_ratio: f32,
+        primary_instance_test_ratio: Option<f32>,
     },
     TecsNonfinitePitch {
         /// Which field first went non-finite (integrator or setpoint).
@@ -265,16 +276,170 @@ pub fn parse_field<T: ParseableFieldType>(data: &DataMessage, name: &str) -> Opt
         .map(|p| p.parse(data.data))
 }
 
+/// PX4 bool fields are distinct from uint8 fields in the ULog parser. Some
+/// historical schemas used uint8; do not treat an absent field as false.
+pub fn parse_bool(data: &DataMessage, name: &str) -> Option<bool> {
+    parse_field::<bool>(data, name).or_else(|| {
+        parse_field::<u8>(data, name).and_then(|value| match value {
+            0 => Some(false),
+            1 => Some(true),
+            _ => None,
+        })
+    })
+}
+
+pub fn timestamp(data: &DataMessage) -> Option<u64> {
+    data.flattened_format
+        .timestamp_field
+        .as_ref()
+        .map(|field| field.parse_timestamp(data.data))
+}
+
+struct VehicleStatusSample {
+    timestamp: u64,
+    format: FlattenedFormat,
+    bytes: Vec<u8>,
+}
+
+#[derive(Default)]
+struct InstanceState<A> {
+    analyzer: A,
+    last_status: Option<u64>,
+    last_measurement: Option<u64>,
+}
+
+impl<A: Analyzer> InstanceState<A> {
+    fn apply_status_through(&mut self, history: &VecDeque<VehicleStatusSample>, timestamp: u64) {
+        let start = history.partition_point(|status| {
+            self.last_status
+                .is_some_and(|previous| status.timestamp <= previous)
+        });
+        for status in history.iter().skip(start) {
+            if status.timestamp > timestamp {
+                break;
+            }
+            self.analyzer.on_message(&DataMessage {
+                msg_id: 0,
+                multi_id: MultiId::new(0),
+                flattened_format: &status.format,
+                data: &status.bytes,
+            });
+            self.last_status = Some(status.timestamp);
+        }
+    }
+}
+
+/// Isolate sensor state and associate it with primary vehicle status by time,
+/// not arrival order. Status updates newer than a measurement are deferred.
+struct PerInstance<A> {
+    prototype: A,
+    instances: BTreeMap<u8, InstanceState<A>>,
+    vehicle_status: VecDeque<VehicleStatusSample>,
+}
+
+impl<A: Analyzer + Default> Default for PerInstance<A> {
+    fn default() -> Self {
+        Self {
+            prototype: A::default(),
+            instances: BTreeMap::new(),
+            vehicle_status: VecDeque::new(),
+        }
+    }
+}
+
+impl<A: Analyzer + Default> Analyzer for PerInstance<A> {
+    fn id(&self) -> &str {
+        self.prototype.id()
+    }
+    fn description(&self) -> &str {
+        self.prototype.description()
+    }
+    fn required_topics(&self) -> &[&str] {
+        self.prototype.required_topics()
+    }
+    fn output_descriptor(&self) -> OutputDescriptor {
+        self.prototype.output_descriptor()
+    }
+
+    fn on_message(&mut self, data: &DataMessage) {
+        let Some(ts) = timestamp(data) else { return };
+        if data.flattened_format.message_name == "vehicle_status" {
+            if data.multi_id.value() != 0 {
+                return;
+            }
+            let index = self
+                .vehicle_status
+                .partition_point(|status| status.timestamp < ts);
+            if self
+                .vehicle_status
+                .get(index)
+                .is_some_and(|status| status.timestamp == ts)
+            {
+                return;
+            }
+            self.vehicle_status.insert(
+                index,
+                VehicleStatusSample {
+                    timestamp: ts,
+                    format: data.flattened_format.clone(),
+                    bytes: data.data.to_vec(),
+                },
+            );
+            // Bounded history for delayed/new sources. Measurements older than
+            // retained state cannot safely be classified as armed.
+            if self.vehicle_status.len() > 128 {
+                self.vehicle_status.pop_front();
+            }
+            return;
+        }
+        if self.required_topics().contains(&"vehicle_status")
+            && self
+                .vehicle_status
+                .front()
+                .is_none_or(|oldest| ts < oldest.timestamp)
+        {
+            return;
+        }
+        let instance = self.instances.entry(data.multi_id.value()).or_default();
+        if instance
+            .last_measurement
+            .is_some_and(|previous| ts <= previous)
+        {
+            return;
+        }
+        instance.apply_status_through(&self.vehicle_status, ts);
+        instance.last_measurement = Some(ts);
+        instance.analyzer.on_message(data);
+    }
+
+    fn finish(self: Box<Self>) -> Vec<Diagnostic> {
+        let mut diagnostics = Vec::new();
+        for (instance, mut state) in self.instances {
+            state.apply_status_through(&self.vehicle_status, u64::MAX);
+            for mut diagnostic in Box::new(state.analyzer).finish() {
+                diagnostic.anchor.instance = (instance != 0).then_some(instance);
+                diagnostics.push(diagnostic);
+            }
+        }
+        diagnostics.sort_by_key(|d| d.timestamp_us);
+        diagnostics
+    }
+}
+
 /// Create all diagnostic analyzers.
 pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
     vec![
-        Box::new(motor_failure::MotorFailureAnalyzer::new()),
-        Box::new(gps_interference::GpsInterferenceAnalyzer::new()),
-        Box::new(battery_brownout::BatteryBrownoutAnalyzer::new()),
-        Box::new(ekf_failure::EkfFailureAnalyzer::new()),
-        Box::new(rc_loss::RcLossAnalyzer::new()),
-        Box::new(ekf_selector_whipsaw::EkfSelectorWhipsawAnalyzer::new()),
-        Box::new(tecs_nonfinite_pitch::TecsNonfinitePitchAnalyzer::new()),
+        Box::new(PerInstance::<motor_failure::MotorFailureAnalyzer>::default()),
+        Box::new(PerInstance::<gps_interference::GpsInterferenceAnalyzer>::default()),
+        Box::new(PerInstance::<battery_brownout::BatteryBrownoutAnalyzer>::default()),
+        Box::new(PerInstance::<ekf_failure::EkfFailureAnalyzer>::default()),
+        Box::new(PerInstance::<rc_loss::RcLossAnalyzer>::default()),
+        Box::new(PerInstance::<
+            ekf_selector_whipsaw::EkfSelectorWhipsawAnalyzer,
+        >::default()),
+        Box::new(PerInstance::<
+            tecs_nonfinite_pitch::TecsNonfinitePitchAnalyzer,
+        >::default()),
     ]
 }
 
