@@ -101,33 +101,64 @@ impl Manifest {
 
 /// Convert a ULog file to per-topic Parquet files in the given output directory.
 pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult, ConvertError> {
-    std::fs::create_dir_all(output_dir).map_err(ConvertError::Parse)?;
+    convert_ulog_with_analyzers(
+        input_path,
+        output_dir,
+        crate::diagnostics::create_analyzers(),
+    )
+}
 
+/// Convert a log while executing only the supplied diagnostic analyzers.
+pub fn convert_ulog_with_analyzers(
+    input_path: &str,
+    output_dir: &Path,
+    analyzers: Vec<Box<dyn crate::diagnostics::Analyzer>>,
+) -> Result<ConvertResult, ConvertError> {
     // Parse the ULog file. A truncated or malformed tail no longer fails the
     // whole parse — read_file returns the valid prefix plus how it ended.
     let parsed = px4_ulog::full_parser::read_file(input_path)?;
+    if parsed.messages.is_empty() {
+        return Err(ConvertError::NoData);
+    }
 
     // Extract metadata via the streaming parser
     let mut metadata = crate::metadata::extract_metadata(input_path)?;
 
     // Run flight analysis (second streaming pass)
-    let analysis = crate::analysis::analyze(input_path, &metadata)?;
+    let analysis = crate::analysis::analyze_with_analyzers(input_path, &metadata, analyzers)?;
     metadata.analysis = Some(analysis);
 
     // Record how the log ended (complete / truncated / malformed). The full parse
     // above is authoritative; the streaming passes also recover their prefixes.
     metadata.completeness = parsed.completeness.clone().into();
+    let mut filenames = std::collections::HashSet::new();
+    for (topic, instances) in &parsed.messages {
+        if topic.contains(['/', '\\']) || topic == "." || topic == ".." {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("unsafe topic filename: {topic}"),
+            )
+            .into());
+        }
+        for instance in instances.keys() {
+            let filename = topic_filename(topic, instance.value());
+            if !filenames.insert(filename.to_lowercase()) {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("colliding topic filename: {filename}"),
+                )
+                .into());
+            }
+        }
+    }
+    std::fs::create_dir_all(output_dir)?;
 
     // Convert each topic to a Parquet file
     let mut parquet_files = Vec::new();
 
     for (topic_name, multi_map) in &parsed.messages {
         for (multi_id, fields) in multi_map {
-            let filename = if multi_id.value() == 0 {
-                format!("{}.parquet", topic_name)
-            } else {
-                format!("{}_{}.parquet", topic_name, multi_id.value())
-            };
+            let filename = topic_filename(topic_name, multi_id.value());
             let path = output_dir.join(&filename);
 
             write_topic_parquet(topic_name, fields, &path)?;
@@ -135,6 +166,15 @@ pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult
         }
     }
 
+    fn topic_filename(topic: &str, instance: u8) -> String {
+        if instance == 0 {
+            format!("{topic}.parquet")
+        } else {
+            format!("{topic}_{instance}.parquet")
+        }
+    }
+
+    parquet_files.sort();
     let result = ConvertResult {
         parquet_files,
         metadata,
@@ -146,8 +186,7 @@ pub fn convert_ulog(input_path: &str, output_dir: &Path) -> Result<ConvertResult
         .and_then(|n| n.to_str())
         .unwrap_or("unknown.ulg");
     let manifest = Manifest::from_result(&result, source_name);
-    let manifest_json = serde_json::to_string_pretty(&manifest)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let manifest_json = crate::cli_support::json(&manifest, true).map_err(std::io::Error::other)?;
     std::fs::write(output_dir.join("manifest.json"), manifest_json)?;
 
     Ok(result)

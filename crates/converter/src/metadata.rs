@@ -214,7 +214,7 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
     let mut last_data_timestamp_us: Option<u64> = None;
 
     // Stream through the file collecting metadata
-    read_file_with_simple_callback(path, &mut |msg| {
+    let completeness = read_file_with_simple_callback(path, &mut |msg| {
         match msg {
             Message::Data(data) => {
                 let topic = &data.flattened_format.message_name;
@@ -263,7 +263,12 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
                     };
 
                     if let Some((lat_deg, lon_deg, alt_m)) = coords {
-                        if lat_deg != 0.0 && lon_deg != 0.0 {
+                        if lat_deg.is_finite()
+                            && lon_deg.is_finite()
+                            && alt_m.is_finite()
+                            && lat_deg != 0.0
+                            && lon_deg != 0.0
+                        {
                             meta.gps_first_fix = Some(GpsPosition {
                                 lat_deg,
                                 lon_deg,
@@ -391,6 +396,7 @@ pub fn extract_metadata(path: &str) -> Result<FlightMetadata, std::io::Error> {
         }
         SimpleCallbackResult::KeepReading
     })?;
+    meta.completeness = completeness.into();
 
     // Flush any remaining multi_info buffers (last message for each key)
     for (key, buffer) in multi_info_buffers {
