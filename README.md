@@ -286,7 +286,7 @@ Key environment variables:
 | `UPLOAD_ONLY` | `false` | Skip downloading, upload existing files from output dir |
 | `RATING_FILTER` | `good\|great` | Pipe-separated ratings to include; `none` for any |
 | `GPS_ONLY` | `true` | Only download logs with GPS-dependent flight modes |
-| `VERIFY` | `true` | Verify each file with `ulog-convert` before uploading |
+| `VERIFY` | `true` | Analyze each downloaded file with `flight-review` before uploading |
 | `MIN_VERSION` | `v1.14` | Minimum PX4 version |
 
 ### Release Build

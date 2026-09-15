@@ -8,7 +8,7 @@
 #   UPLOAD_ONLY=true  Skip downloading, upload existing files from OUTPUT_DIR
 #
 # Requirements: curl, jq
-# Optional:     cargo (for --verify, builds ulog-convert if needed)
+# Optional:     cargo (when VERIFY=true, builds flight-review if needed)
 #
 set -euo pipefail
 
@@ -26,7 +26,7 @@ MAV_TYPE="${MAV_TYPE:-}"                            # e.g. "Quadrotor", empty = 
 GPS_ONLY="${GPS_ONLY:-true}"                        # require GPS-dependent flight modes
 MIN_VERSION="${MIN_VERSION:-v1.14}"                 # minimum PX4 version, empty = any
 MAX_VERSION="${MAX_VERSION:-v2.0}"                  # max version (excludes custom builds like v50.x)
-VERIFY="${VERIFY:-true}"                            # verify each file with ulog-convert
+VERIFY="${VERIFY:-true}"                            # verify each file with flight-review
 
 # Upload settings
 UPLOAD_URL="${UPLOAD_URL:-}"                        # e.g. "http://localhost:8080", empty = skip upload
@@ -92,16 +92,16 @@ if [[ "$UPLOAD_ONLY" == "true" ]]; then
   exit 0
 fi
 
-# Build ulog-convert if verification is enabled
-ULOG_CONVERT=""
+# Build flight-review if verification is enabled
+FLIGHT_REVIEW=""
 if [[ "$VERIFY" == "true" ]]; then
-  ULOG_CONVERT="$REPO_ROOT/target/release/ulog-convert"
-  if [[ ! -x "$ULOG_CONVERT" ]]; then
-    info "Building ulog-convert for verification..."
-    (cd "$REPO_ROOT" && cargo build -p flight-review --bin ulog-convert --release 2>&1 | tail -1)
+  FLIGHT_REVIEW="$REPO_ROOT/target/release/flight-review"
+  if [[ ! -x "$FLIGHT_REVIEW" ]]; then
+    info "Building flight-review for verification..."
+    (cd "$REPO_ROOT" && cargo build -p flight-review --bin flight-review --release 2>&1 | tail -1)
   fi
-  [[ -x "$ULOG_CONVERT" ]] || error "Failed to build ulog-convert"
-  info "Verification enabled: $ULOG_CONVERT"
+  [[ -x "$FLIGHT_REVIEW" ]] || error "Failed to build flight-review"
+  info "Verification enabled: $FLIGHT_REVIEW"
 fi
 
 # --- Step 1: Fetch or reuse cached dbinfo ---
@@ -201,7 +201,7 @@ echo "$SELECTED" | jq -r '.[] | "\(.log_id)\t\(.download_url)\t\(.mav_type)\t\(.
 {
   i=0
   failed=0
-  invalid=0
+  verification_failed=0
   skipped=0
   upload_ok=0
   upload_fail=0
@@ -235,14 +235,14 @@ echo "$SELECTED" | jq -r '.[] | "\(.log_id)\t\(.download_url)\t\(.mav_type)\t\(.
 
     size=$(du -h "$dest" | cut -f1)
 
-    # Verify with ulog-convert
-    if [[ -n "$ULOG_CONVERT" ]]; then
-      if $ULOG_CONVERT --metadata-only "$dest" > /dev/null 2>&1; then
+    # Verify with flight-review
+    if [[ -n "$FLIGHT_REVIEW" ]]; then
+      if "$FLIGHT_REVIEW" "$dest" > /dev/null 2>&1; then
         info "  -> $size (verified)"
       else
-        warn "  -> $size (INVALID ULog, removing)"
+        warn "  -> $size (verification failed, removing)"
         rm -f "$dest"
-        invalid=$((invalid + 1))
+        verification_failed=$((verification_failed + 1))
         continue
       fi
     else
@@ -261,12 +261,12 @@ echo "$SELECTED" | jq -r '.[] | "\(.log_id)\t\(.download_url)\t\(.mav_type)\t\(.
     fi
   done
 
-  downloaded=$((i - failed - invalid - skipped))
+  downloaded=$((i - failed - verification_failed - skipped))
   info "=== Summary ==="
   info "  Downloaded: $downloaded"
   info "  Skipped (existing): $skipped"
   [[ $failed -eq 0 ]]  || warn "  Failed downloads: $failed"
-  [[ $invalid -eq 0 ]] || warn "  Invalid ULog files: $invalid"
+  [[ $verification_failed -eq 0 ]] || warn "  Failed verification: $verification_failed"
   if [[ -n "$UPLOAD_URL" ]]; then
     info "  Uploaded: $upload_ok"
     [[ $upload_fail -eq 0 ]] || warn "  Upload failures: $upload_fail"
