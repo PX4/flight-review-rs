@@ -3,10 +3,9 @@ pub mod cli_support;
 pub mod converter;
 pub mod diagnostics;
 pub mod metadata;
-pub mod pid_analysis;
 pub mod signal_processing;
 
-/// This crate's version (shared library, `flight-review`, and `ulog-convert`).
+/// This crate's version (shared library and `flight-review` CLI).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// The resolved `px4-ulog` parser version, captured from `Cargo.lock` at build

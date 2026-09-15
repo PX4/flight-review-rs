@@ -26,7 +26,7 @@ struct Options {
     version,
     subcommand_negates_reqs = true,
     args_conflicts_with_subcommands = true,
-    about = "Analyze PX4 ULog flights; no files are written unless export is requested",
+    about = env!("CARGO_PKG_DESCRIPTION"),
     after_help = "PATH may be a file or a directory (recursive, case-insensitive .ulg discovery).\n\
                   flight-review PATH [OPTIONS] is equivalent to flight-review analyze PATH [OPTIONS].\n\
                   Output is JSON; directories emit one JSON record per log (NDJSON) by default.\n\

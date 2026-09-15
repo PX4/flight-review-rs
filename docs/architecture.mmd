@@ -1,0 +1,40 @@
+---
+config:
+  theme: base
+  htmlLabels: false
+  fontFamily: Arial, Helvetica, sans-serif
+  themeVariables:
+    fontFamily: Arial, Helvetica, sans-serif
+    fontSize: 16px
+    primaryTextColor: "#0f172a"
+    lineColor: "#475569"
+    edgeLabelBackground: "#ffffff"
+  flowchart:
+    htmlLabels: false
+    curve: linear
+    nodeSpacing: 35
+    rankSpacing: 45
+---
+flowchart LR
+    accTitle: Flight Review — two paths
+    accDescr: PX4 ULog files can be analyzed locally with the flight-review CLI, with optional Parquet and metadata export, or uploaded to the flight-review-server HTTP API, backed by S3 or local file storage and SQLite or PostgreSQL.
+
+    ULog["PX4 ULog files"]
+    CLI["flight-review CLI<br/>Local analysis"]
+    Export["Parquet + metadata<br/>Optional export"]
+    Server["flight-review-server<br/>HTTP API"]
+    Files[("File storage<br/>S3 or local")]
+    Database[("Database<br/>SQLite or PostgreSQL")]
+
+    ULog --> CLI
+    CLI -.-> Export
+    ULog --> Server
+    Server --> Files
+    Server --> Database
+
+    classDef source fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e,stroke-width:1.5px
+    classDef local fill:#ecfdf5,stroke:#059669,color:#064e3b,stroke-width:1.5px
+    classDef hosted fill:#eff6ff,stroke:#2563eb,color:#1e3a8a,stroke-width:1.5px
+    class ULog source
+    class CLI,Export local
+    class Server,Files,Database hosted
