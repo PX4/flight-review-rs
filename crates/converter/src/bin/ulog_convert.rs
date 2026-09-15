@@ -1,5 +1,5 @@
+use std::io::Write;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
@@ -88,7 +88,7 @@ enum Command {
         #[arg(long, value_delimiter = ',')]
         modules: Vec<String>,
 
-        /// Number of parallel workers (default: num CPUs)
+        /// Number of parallel workers, 1–256 (default: num CPUs)
         #[arg(long, short)]
         jobs: Option<usize>,
 
@@ -114,18 +114,19 @@ enum Command {
     },
 }
 
-fn serialize_metadata(
-    metadata: &flight_review::metadata::FlightMetadata,
-    format: &OutputFormat,
-) -> String {
-    match format {
-        OutputFormat::Pretty => serde_json::to_string_pretty(metadata).unwrap(),
-        OutputFormat::Compact => serde_json::to_string(metadata).unwrap(),
+type CliResult<T> = Result<T, Box<dyn std::error::Error>>;
+
+fn main() {
+    if let Err(error) = run() {
+        let _ = writeln!(std::io::stderr().lock(), "error: {error}");
+        std::process::exit(1);
     }
 }
 
-fn main() {
+fn run() -> CliResult<()> {
     let cli = Cli::parse();
+    let mut stdout = std::io::stdout().lock();
+    let mut stderr = std::io::stderr().lock();
 
     match cli.command {
         Some(Command::Analyze {
@@ -136,29 +137,16 @@ fn main() {
             let analyses = if modules.is_empty() {
                 flight_review::signal_processing::create_analyses()
             } else {
-                match flight_review::signal_processing::create_analyses_filtered(&modules) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        eprintln!("error: {e}");
-                        std::process::exit(1);
-                    }
-                }
+                flight_review::signal_processing::create_analyses_filtered(&modules)?
             };
 
-            match flight_review::signal_processing::run_analyses(&file, &analyses) {
-                Ok(results) => {
-                    let json = match output_format {
-                        OutputFormat::Pretty => serde_json::to_string_pretty(&results).unwrap(),
-                        OutputFormat::Compact => serde_json::to_string(&results).unwrap(),
-                    };
-                    println!("{json}");
-                }
-                Err(e) => {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
-                }
-            }
-            return;
+            let results = flight_review::signal_processing::run_analyses(&file, &analyses)?;
+            let json = flight_review::cli_support::json(
+                &results,
+                matches!(output_format, OutputFormat::Pretty),
+            )?;
+            writeln!(stdout, "{json}")?;
+            return Ok(());
         }
         Some(Command::Batch {
             path,
@@ -183,26 +171,15 @@ fn main() {
 
             // Validate filters upfront
             if !opts.analyzer_filter.is_empty() {
-                if let Err(e) =
-                    flight_review::diagnostics::create_analyzers_filtered(&opts.analyzer_filter)
-                {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
-                }
+                flight_review::diagnostics::create_analyzers_filtered(&opts.analyzer_filter)?;
             }
             if !opts.module_filter.is_empty() {
-                if let Err(e) =
-                    flight_review::signal_processing::create_analyses_filtered(&opts.module_filter)
-                {
-                    eprintln!("error: {e}");
-                    std::process::exit(1);
-                }
+                flight_review::signal_processing::create_analyses_filtered(&opts.module_filter)?;
             }
 
-            // Default: if nothing specified, just convert
+            // Preserve the legacy diagnostics-only default when no action is specified.
             let opts = if !opts.convert && !opts.diagnostics && !opts.analyze {
-                eprintln!("hint: use -o <DIR> to convert, --diagnostics to scan, --analyze for signal processing");
-                eprintln!();
+                writeln!(stderr, "hint: use -o <DIR> to convert, --diagnostics to scan, --analyze for signal processing\n")?;
                 BatchOpts {
                     diagnostics: true,
                     diagnostics_only: true,
@@ -212,8 +189,7 @@ fn main() {
                 opts
             };
 
-            run_batch(&path, &opts, jobs, &format);
-            return;
+            return run_batch(&path, &opts, jobs, &format, &mut stdout, &mut stderr);
         }
         None => {}
     }
@@ -223,62 +199,42 @@ fn main() {
     let input = match cli.input {
         Some(ref i) => i.as_str(),
         None => {
-            eprintln!("error: missing input file");
-            eprintln!();
-            eprintln!("Usage:");
-            eprintln!("  ulog-convert <FILE> [OPTIONS]           Convert a single file");
-            eprintln!("  ulog-convert batch <DIR> [OPTIONS]      Batch process a directory");
-            eprintln!("  ulog-convert analyze <FILE> [OPTIONS]   Run signal processing");
-            eprintln!("  ulog-convert list                       List available modules");
-            std::process::exit(1);
+            return Err("missing input file\n\nUsage:\n  ulog-convert <FILE> [OPTIONS]           Convert a single file\n  ulog-convert batch <DIR> [OPTIONS]      Batch process a directory\n  ulog-convert analyze <FILE> [OPTIONS]   Run signal processing\n  flight-review list                     List available modules".into());
         }
     };
 
     if cli.pid_analysis {
-        let result = match flight_review::pid_analysis::pid_analysis(input) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
-        };
-        let json = match &cli.output_format {
-            OutputFormat::Pretty => serde_json::to_string_pretty(&result).unwrap(),
-            OutputFormat::Compact => serde_json::to_string(&result).unwrap(),
-        };
-        println!("{json}");
+        let result = flight_review::pid_analysis::pid_analysis(input)?;
+        let json = flight_review::cli_support::json(
+            &result,
+            matches!(cli.output_format, OutputFormat::Pretty),
+        )?;
+        writeln!(stdout, "{json}")?;
         if !cli.metadata_only {
-            return;
+            return Ok(());
         }
     }
 
     if cli.metadata_only {
-        let mut metadata = match flight_review::metadata::extract_metadata(input) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
-        };
-        if let Ok(analysis) = flight_review::analysis::analyze(input, &metadata) {
-            metadata.analysis = Some(analysis);
-        }
-
-        let json = serialize_metadata(&metadata, &cli.output_format);
+        let metadata = flight_review::cli_support::analyzed_metadata(input)?;
+        let json = flight_review::cli_support::json(
+            &metadata,
+            matches!(cli.output_format, OutputFormat::Pretty),
+        )?;
 
         match &cli.output_dir {
             Some(dir) => {
                 let output_path = Path::new(dir);
-                std::fs::create_dir_all(output_path).unwrap();
+                std::fs::create_dir_all(output_path)?;
                 let meta_path = output_path.join("metadata.json");
-                std::fs::write(&meta_path, &json).unwrap();
-                eprintln!("Metadata written to {}", meta_path.display());
+                std::fs::write(&meta_path, &json)?;
+                writeln!(stderr, "Metadata written to {}", meta_path.display())?;
             }
             None => {
-                println!("{json}");
+                writeln!(stdout, "{json}")?;
             }
         }
-        return;
+        return Ok(());
     }
 
     // Full conversion mode
@@ -294,56 +250,61 @@ fn main() {
     let output_path = Path::new(&output_dir);
 
     let start = Instant::now();
-    let result = match flight_review::converter::convert_ulog(input, output_path) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("error: {e}");
-            std::process::exit(1);
-        }
-    };
+    let result = flight_review::converter::convert_ulog(input, output_path)?;
     let elapsed = start.elapsed();
 
-    let input_size = std::fs::metadata(input).map(|m| m.len()).unwrap_or(0);
+    let input_size = std::fs::metadata(input)?.len();
     let output_size: u64 = result
         .parquet_files
         .iter()
-        .filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len()))
+        .map(|p| std::fs::metadata(p).map(|m| m.len()))
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .sum();
 
-    eprintln!("Converted: {input}");
-    eprintln!(
+    writeln!(stderr, "Converted: {input}")?;
+    writeln!(
+        stderr,
         "Output:    {output_dir} ({} files)",
         result.parquet_files.len()
-    );
-    eprintln!(
+    )?;
+    writeln!(
+        stderr,
         "Size:      {:.1} MB -> {:.1} MB ({:.0}% of original)",
         input_size as f64 / 1024.0 / 1024.0,
         output_size as f64 / 1024.0 / 1024.0,
-        output_size as f64 / input_size as f64 * 100.0
-    );
-    eprintln!("Time:      {:.0}ms", elapsed.as_millis());
-    eprintln!(
+        output_size as f64 / input_size.max(1) as f64 * 100.0
+    )?;
+    writeln!(stderr, "Time:      {:.0}ms", elapsed.as_millis())?;
+    writeln!(
+        stderr,
         "Throughput: {:.0} MB/s",
-        input_size as f64 / 1024.0 / 1024.0 / elapsed.as_secs_f64()
-    );
+        input_size as f64 / 1024.0 / 1024.0 / elapsed.as_secs_f64().max(f64::EPSILON)
+    )?;
 
     let meta_path = output_path.join("metadata.json");
-    let meta_json = serialize_metadata(&result.metadata, &cli.output_format);
-    std::fs::write(&meta_path, &meta_json).unwrap();
-    eprintln!("Metadata:  {}", meta_path.display());
+    flight_review::cli_support::write_json(
+        &meta_path,
+        &result.metadata,
+        matches!(cli.output_format, OutputFormat::Pretty),
+    )?;
+    writeln!(stderr, "Metadata:  {}", meta_path.display())?;
 
     if let Some(name) = &result.metadata.sys_name {
-        eprintln!(
+        writeln!(
+            stderr,
             "\nVehicle:   {} ({})",
             name,
             result.metadata.ver_hw.as_deref().unwrap_or("unknown hw")
-        );
+        )?;
     }
-    eprintln!("Topics:    {}", result.metadata.topics.len());
-    eprintln!(
+    writeln!(stderr, "Topics:    {}", result.metadata.topics.len())?;
+    writeln!(
+        stderr,
         "Dropouts:  {} ({} ms total)",
         result.metadata.dropout_count, result.metadata.dropout_total_ms
-    );
+    )?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -402,21 +363,41 @@ struct BatchIndexEntry {
     diagnostic_count: usize,
 }
 
-fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFormat) {
-    let files: Vec<String> = walkdir::WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            e.path()
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("ulg"))
+fn run_batch(
+    dir: &str,
+    opts: &BatchOpts,
+    jobs: Option<usize>,
+    format: &BatchFormat,
+    stdout: &mut impl Write,
+    stderr: &mut impl Write,
+) -> CliResult<()> {
+    let pool = flight_review::cli_support::worker_pool(jobs)?;
+    let (_, discovered) = flight_review::cli_support::discover(Path::new(dir))?;
+    let files: Vec<String> = discovered
+        .iter()
+        .map(|path| {
+            path.to_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("input path is not valid UTF-8: {}", path.display()))
         })
-        .map(|e| e.path().to_string_lossy().to_string())
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     if files.is_empty() {
-        eprintln!("No .ulg files found in {dir}");
-        std::process::exit(1);
+        return Err(format!("No .ulg files found in {dir}").into());
+    }
+
+    if opts.convert {
+        let mut targets = std::collections::HashMap::new();
+        for file in &files {
+            let stem = output_stem(file)?;
+            // Also protect case-insensitive filesystems without changing the legacy layout.
+            if let Some(previous) = targets.insert(stem.to_lowercase(), file) {
+                return Err(format!(
+                    "colliding batch output target '{stem}': {previous} and {file}"
+                )
+                .into());
+            }
+        }
     }
 
     let total = files.len();
@@ -430,66 +411,37 @@ fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFor
     if opts.analyze {
         actions.push("analyze");
     }
-    eprintln!(
+    writeln!(
+        stderr,
         "Processing {} ULog files [{}]...\n",
         total,
         actions.join(", ")
-    );
+    )?;
 
-    if let Some(j) = jobs {
-        rayon::ThreadPoolBuilder::new()
-            .num_threads(j)
-            .build_global()
-            .ok();
-    }
-
-    let processed = AtomicUsize::new(0);
-    let with_diags = AtomicUsize::new(0);
-    let converted = AtomicUsize::new(0);
-    let errors = AtomicUsize::new(0);
-
-    let results: Vec<BatchResult> = files
-        .par_iter()
-        .filter_map(|file| {
-            let result = process_one_file(file, opts);
-            let n = processed.fetch_add(1, Ordering::Relaxed) + 1;
-
-            if result.error.is_some() {
-                errors.fetch_add(1, Ordering::Relaxed);
-            }
-            if !result.diagnostics.is_empty() {
-                with_diags.fetch_add(1, Ordering::Relaxed);
-            }
-            if result.converted == Some(true) {
-                converted.fetch_add(1, Ordering::Relaxed);
-            }
-
-            if n.is_multiple_of(100) || n == total {
-                eprint!("\r  [{n}/{total}] processed");
-            }
-
-            // Filter out empty results if diagnostics-only
-            if opts.diagnostics_only && result.diagnostics.is_empty() && result.error.is_none() {
-                return None;
-            }
-
-            Some(result)
+    let results: Vec<BatchResult> = pool.install(|| {
+        files
+            .par_iter()
+            .map(|file| process_one_file(file, opts))
+            .collect()
+    });
+    let visible: Vec<&BatchResult> = results
+        .iter()
+        .filter(|result| {
+            !opts.diagnostics_only || !result.diagnostics.is_empty() || result.error.is_some()
         })
         .collect();
 
-    eprintln!();
-
     // Output
     match format {
-        BatchFormat::Table => print_table(&results, opts),
+        BatchFormat::Table => print_table(&visible, opts, stdout)?,
         BatchFormat::Json => {
-            for r in &results {
-                println!("{}", serde_json::to_string(r).unwrap());
+            for r in &visible {
+                writeln!(stdout, "{}", flight_review::cli_support::json(r, false)?)?;
             }
         }
         BatchFormat::JsonPretty => {
-            for r in &results {
-                println!("{}", serde_json::to_string_pretty(r).unwrap());
+            for r in &visible {
+                writeln!(stdout, "{}", flight_review::cli_support::json(r, true)?)?;
             }
         }
     }
@@ -519,16 +471,15 @@ fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFor
         };
 
         let index_path = Path::new(output_dir).join("index.json");
-        if let Ok(json) = serde_json::to_string_pretty(&index) {
-            let _ = std::fs::write(&index_path, json);
-            eprintln!("Index:  {}", index_path.display());
-        }
+        std::fs::create_dir_all(output_dir)?;
+        flight_review::cli_support::write_json(&index_path, &index, true)?;
+        writeln!(stderr, "Index:  {}", index_path.display())?;
     }
 
     // Summary
-    let diag_count = with_diags.load(Ordering::Relaxed);
-    let conv_count = converted.load(Ordering::Relaxed);
-    let err_count = errors.load(Ordering::Relaxed);
+    let diag_count = results.iter().filter(|r| !r.diagnostics.is_empty()).count();
+    let conv_count = results.iter().filter(|r| r.converted == Some(true)).count();
+    let err_count = results.iter().filter(|r| r.error.is_some()).count();
     let mut parts = vec![format!("{total} files")];
     if opts.convert {
         parts.push(format!("{conv_count} converted"));
@@ -537,119 +488,112 @@ fn run_batch(dir: &str, opts: &BatchOpts, jobs: Option<usize>, format: &BatchFor
         parts.push(format!("{diag_count} with diagnostics"));
     }
     parts.push(format!("{err_count} errors"));
-    eprintln!("\n{}", parts.join(", "));
+    writeln!(stderr, "\n{}", parts.join(", "))?;
+    if err_count > 0 {
+        return Err(format!("{err_count} ULog file(s) failed").into());
+    }
+    Ok(())
+}
+
+fn output_stem(path: &str) -> Result<String, String> {
+    Path::new(path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| format!("invalid output stem for {path}"))
 }
 
 fn process_one_file(path: &str, opts: &BatchOpts) -> BatchResult {
-    let metadata = match flight_review::metadata::extract_metadata(path) {
-        Ok(m) => m,
-        Err(e) => {
-            return BatchResult {
-                file: path.to_string(),
-                converted: None,
-                output_dir: None,
-                diagnostics: vec![],
-                analyses: None,
-                vehicle: None,
-                hardware: None,
-                duration_s: None,
-                error: Some(e.to_string()),
-            };
-        }
+    let mut result = BatchResult {
+        file: path.to_string(),
+        converted: opts.convert.then_some(false),
+        output_dir: None,
+        diagnostics: vec![],
+        analyses: None,
+        vehicle: None,
+        hardware: None,
+        duration_s: None,
+        error: None,
+    };
+    if let Err(error) = process_file(path, opts, &mut result) {
+        result.error = Some(error.to_string());
+    }
+    // Keep serialization failures representable as per-file JSON error records.
+    if let Err(error) = flight_review::cli_support::json(&result, false) {
+        result.error = Some(match result.error.take() {
+            Some(previous) => format!("{previous}; {error}"),
+            None => error,
+        });
+        result.duration_s = None;
+        result.diagnostics.clear();
+        result.analyses = None;
+    }
+    result
+}
+
+fn process_file(path: &str, opts: &BatchOpts, result: &mut BatchResult) -> CliResult<()> {
+    let mut metadata = if let Some(output_dir) = opts.output_dir.as_ref().filter(|_| opts.convert) {
+        let stem = output_stem(path)?;
+        let file_output = Path::new(output_dir).join(&stem);
+        let conversion = flight_review::converter::convert_ulog(path, &file_output)?;
+        result.vehicle = conversion.metadata.sys_name.clone();
+        result.hardware = conversion.metadata.ver_hw.clone();
+        result.duration_s = conversion.metadata.flight_duration_s;
+        flight_review::cli_support::write_json(
+            &file_output.join("metadata.json"),
+            &conversion.metadata,
+            true,
+        )?;
+        result.converted = Some(true);
+        result.output_dir = Some(stem);
+        conversion.metadata
+    } else if opts.diagnostics {
+        flight_review::cli_support::analyzed_metadata(path)?
+    } else {
+        flight_review::metadata::extract_metadata(path)?
     };
 
-    let vehicle = metadata.sys_name.clone();
-    let hardware = metadata.ver_hw.clone();
-    let duration_s = metadata.flight_duration_s;
+    result.vehicle = metadata.sys_name.clone();
+    result.hardware = metadata.ver_hw.clone();
+    result.duration_s = metadata.flight_duration_s;
 
-    // Conversion
-    let mut did_convert = None;
-    let mut convert_output_dir = None;
-    if opts.convert {
-        if let Some(ref output_dir) = opts.output_dir {
-            let stem = Path::new(path)
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-            let file_output = Path::new(output_dir).join(&stem);
-            match flight_review::converter::convert_ulog(path, &file_output) {
-                Ok(result) => {
-                    let meta_json = serde_json::to_string_pretty(&result.metadata).unwrap();
-                    let _ = std::fs::write(file_output.join("metadata.json"), &meta_json);
-                    did_convert = Some(true);
-                    convert_output_dir = Some(stem);
-                }
-                Err(e) => {
-                    return BatchResult {
-                        file: path.to_string(),
-                        converted: Some(false),
-                        output_dir: None,
-                        diagnostics: vec![],
-                        analyses: None,
-                        vehicle,
-                        hardware,
-                        duration_s,
-                        error: Some(e.to_string()),
-                    };
-                }
-            }
-        }
+    if opts.diagnostics {
+        let analysis = metadata
+            .analysis
+            .take()
+            .ok_or("flight analysis is missing from metadata")?;
+        result.diagnostics = analysis
+            .diagnostics
+            .into_iter()
+            .filter(|d| {
+                opts.analyzer_filter.is_empty() || opts.analyzer_filter.iter().any(|id| id == &d.id)
+            })
+            .collect();
     }
 
-    // Diagnostics
-    let diagnostics = if opts.diagnostics {
-        match flight_review::analysis::analyze(path, &metadata) {
-            Ok(analysis) => {
-                if opts.analyzer_filter.is_empty() {
-                    analysis.diagnostics
-                } else {
-                    analysis
-                        .diagnostics
-                        .into_iter()
-                        .filter(|d| opts.analyzer_filter.iter().any(|id| id == &d.id))
-                        .collect()
-                }
-            }
-            Err(_) => vec![],
-        }
-    } else {
-        vec![]
-    };
-
-    // Signal processing
-    let analyses = if opts.analyze {
+    if opts.analyze {
         let modules = if opts.module_filter.is_empty() {
             flight_review::signal_processing::create_analyses()
         } else {
-            flight_review::signal_processing::create_analyses_filtered(&opts.module_filter)
-                .unwrap_or_default()
+            flight_review::signal_processing::create_analyses_filtered(&opts.module_filter)?
         };
-        match flight_review::signal_processing::run_analyses(path, &modules) {
-            Ok(r) if !r.is_empty() => Some(r),
-            _ => None,
+        let analyses = flight_review::signal_processing::run_analyses(path, &modules)?;
+        if !analyses.is_empty() {
+            result.analyses = Some(analyses);
         }
-    } else {
-        None
-    };
-
-    BatchResult {
-        file: path.to_string(),
-        converted: did_convert,
-        output_dir: convert_output_dir,
-        diagnostics,
-        analyses,
-        vehicle,
-        hardware,
-        duration_s,
-        error: None,
     }
+    Ok(())
 }
 
-fn print_table(results: &[BatchResult], opts: &BatchOpts) {
+fn print_table(
+    results: &[&BatchResult],
+    opts: &BatchOpts,
+    stdout: &mut impl Write,
+) -> CliResult<()> {
     if results.is_empty() {
-        println!("No results.");
-        return;
+        writeln!(stdout, "No results.")?;
+        return Ok(());
     }
 
     // Dynamic header based on what was requested
@@ -660,8 +604,8 @@ fn print_table(results: &[BatchResult], opts: &BatchOpts) {
     if opts.diagnostics {
         header.push_str(" DIAGNOSTICS");
     }
-    println!("{header}");
-    println!("{}", "-".repeat(header.len().max(110)));
+    writeln!(stdout, "{header}")?;
+    writeln!(stdout, "{}", "-".repeat(header.len().max(110)))?;
 
     for r in results {
         let mut line = format!(
@@ -673,7 +617,7 @@ fn print_table(results: &[BatchResult], opts: &BatchOpts) {
 
         if let Some(ref err) = r.error {
             line.push_str(&format!(" ERROR: {err}"));
-            println!("{line}");
+            writeln!(stdout, "{line}")?;
             continue;
         }
 
@@ -719,8 +663,9 @@ fn print_table(results: &[BatchResult], opts: &BatchOpts) {
             }
         }
 
-        println!("{line}");
+        writeln!(stdout, "{line}")?;
     }
+    Ok(())
 }
 
 fn truncate_path(path: &str, max_len: usize) -> String {
@@ -735,6 +680,11 @@ fn truncate_path(path: &str, max_len: usize) -> String {
     if short.len() <= max_len {
         short
     } else {
-        format!("...{}", &path[path.len() - (max_len - 3)..])
+        let start = path
+            .char_indices()
+            .rev()
+            .nth(max_len.saturating_sub(4))
+            .map_or(0, |(index, _)| index);
+        format!("...{}", &path[start..])
     }
 }

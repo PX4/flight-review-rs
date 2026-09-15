@@ -106,6 +106,7 @@ impl SignalAnalysis for PidStepResponseAnalysis {
 
     fn analyze(&self, signals: &SignalStore) -> Result<serde_json::Value, AnalysisError> {
         let mut result = PidAnalysisResult { axes: Vec::new() };
+        let mut unavailable = Vec::new();
 
         for (axis_name, setpoint_field, gyro_field) in AXES {
             let setpoint_req = SignalRequest::new("vehicle_rates_setpoint", setpoint_field);
@@ -114,14 +115,18 @@ impl SignalAnalysis for PidStepResponseAnalysis {
             let setpoint_raw = signals.get(&setpoint_req);
             let gyro_raw = signals.get(&gyro_req);
 
-            if let Some(response) = analyze_axis(axis_name, setpoint_raw, gyro_raw) {
-                result.axes.push(response);
+            match analyze_axis(axis_name, setpoint_raw, gyro_raw) {
+                Ok(response) => result.axes.push(response),
+                Err(reason) => unavailable.push(format!("{axis_name}: {reason}")),
             }
         }
 
         if result.axes.is_empty() {
             return Err(AnalysisError::InsufficientData {
-                reason: "no axis had sufficient data for PID analysis".to_string(),
+                reason: format!(
+                    "No axis met PID step-response criteria. {}",
+                    unavailable.join("; ")
+                ),
             });
         }
 
@@ -137,16 +142,21 @@ fn analyze_axis(
     axis: &str,
     setpoint_raw: &[(f64, f64)],
     gyro_raw: &[(f64, f64)],
-) -> Option<PidStepResponse> {
+) -> Result<PidStepResponse, String> {
     if setpoint_raw.len() < 2 || gyro_raw.len() < 2 {
-        return None;
+        return Err(format!(
+            "not enough data: {} rate-setpoint samples and {} measured-rate samples; need at least 2 of each",
+            setpoint_raw.len(), gyro_raw.len()
+        ));
     }
 
     let setpoint_rate = median_sample_rate(setpoint_raw);
     let gyro_rate = median_sample_rate(gyro_raw);
     let sample_rate = setpoint_rate.min(gyro_rate);
     if !sample_rate.is_finite() || sample_rate < MIN_SAMPLE_RATE_HZ * (1.0 - 1e-9) {
-        return None;
+        return Err(format!(
+            "insufficient sampling or invalid timestamps: setpoint {setpoint_rate:.1} Hz, measured rate {gyro_rate:.1} Hz; both need at least {MIN_SAMPLE_RATE_HZ:.0} Hz"
+        ));
     }
 
     let t_start = setpoint_raw[0].0.max(gyro_raw[0].0);
@@ -156,7 +166,10 @@ fn analyze_axis(
         .0
         .min(gyro_raw.last().unwrap().0);
     if t_end - t_start < WINDOW_DURATION_S {
-        return None;
+        return Err(format!(
+            "insufficient overlapping data: {:.2} s; need at least {WINDOW_DURATION_S:.1} s",
+            (t_end - t_start).max(0.0)
+        ));
     }
 
     let window_samples = (WINDOW_DURATION_S * sample_rate).round() as usize;
@@ -164,14 +177,17 @@ fn analyze_axis(
     let response_samples = (RESPONSE_DURATION_S * sample_rate).round() as usize;
 
     if window_samples < 4 || step_samples == 0 || response_samples == 0 {
-        return None;
+        return Err("sampling cannot form a usable analysis window".into());
     }
 
     let hann = hanning_window(window_samples);
     let mut all_step_responses: Vec<Vec<f64>> = Vec::new();
+    let mut attempted_windows = 0;
+    let mut covered_windows = 0;
 
     let mut offset = 0;
     while t_start + (offset + window_samples - 1) as f64 / sample_rate <= t_end {
+        attempted_windows += 1;
         let start = t_start + offset as f64 / sample_rate;
         if let (Some(sp_win), Some(gy_win)) = (
             resample_covered_window(
@@ -183,6 +199,7 @@ fn analyze_axis(
             ),
             resample_covered_window(gyro_raw, gyro_rate, sample_rate, start, window_samples),
         ) {
+            covered_windows += 1;
             if let Some(step) =
                 wiener_step_response(&sp_win, &gy_win, &hann, window_samples, response_samples)
             {
@@ -194,7 +211,20 @@ fn analyze_axis(
     }
 
     if all_step_responses.len() < MIN_WINDOWS {
-        return None;
+        return Err(if attempted_windows < MIN_WINDOWS {
+            format!(
+                "only {attempted_windows} overlapping analysis windows; need at least {MIN_WINDOWS}"
+            )
+        } else if covered_windows < MIN_WINDOWS {
+            format!(
+                "only {covered_windows} windows have contiguous finite setpoint and measured-rate data; need at least {MIN_WINDOWS}; gaps or unavailable values prevent analysis"
+            )
+        } else {
+            format!(
+                "only {} of {covered_windows} windows meet excitation and response-quality criteria; need at least {MIN_WINDOWS}; insufficient excitation or noncausal/unsettled responses cannot produce a useful estimate",
+                all_step_responses.len()
+            )
+        });
     }
 
     let resp_len = response_samples.min(
@@ -205,7 +235,7 @@ fn analyze_axis(
             .unwrap_or(0),
     );
     if resp_len == 0 {
-        return None;
+        return Err("qualified windows contained no response samples".into());
     }
 
     let mut mean_response = vec![0.0f64; resp_len];
@@ -224,7 +254,7 @@ fn analyze_axis(
 
     let histogram = build_histogram(&all_step_responses, resp_len, &time_s);
 
-    Some(PidStepResponse {
+    Ok(PidStepResponse {
         axis: axis.to_string(),
         sample_rate_hz: sample_rate,
         window_count: all_step_responses.len(),
@@ -420,6 +450,29 @@ mod tests {
         ] {
             assert!(wiener_step_response(&signal, &signal, &hanning_window(n), n, n / 2).is_none());
         }
+    }
+
+    #[test]
+    fn unavailable_reasons_distinguish_sampling_coverage_and_quality() {
+        assert!(analyze_axis("roll", &[], &[])
+            .unwrap_err()
+            .contains("not enough data"));
+        let slow: Vec<_> = (0..10).map(|i| (i as f64, 1.0)).collect();
+        assert!(analyze_axis("roll", &slow, &slow)
+            .unwrap_err()
+            .contains("both need at least 50 Hz"));
+        let short: Vec<_> = (0..40).map(|i| (i as f64 / 100.0, 1.0)).collect();
+        assert!(analyze_axis("roll", &short, &short)
+            .unwrap_err()
+            .contains("overlapping data"));
+        let constant: Vec<_> = (0..301).map(|i| (i as f64 / 100.0, 1.0)).collect();
+        let missing: Vec<_> = constant.iter().map(|(t, _)| (*t, f64::NAN)).collect();
+        assert!(analyze_axis("roll", &constant, &missing)
+            .unwrap_err()
+            .contains("contiguous finite"));
+        assert!(analyze_axis("roll", &constant, &constant)
+            .unwrap_err()
+            .contains("excitation and response-quality criteria"));
     }
 
     #[test]
