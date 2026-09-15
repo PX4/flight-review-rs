@@ -55,21 +55,21 @@ jobs:
 
       - name: Build CLI and server
         run: |
-          cargo build --release --target ${{ matrix.target }} -p flight-review
+          cargo build --release --target ${{ matrix.target }} -p flight-review --bins
           cargo build --release --target ${{ matrix.target }} -p flight-review-server
 
       - name: Package (unix)
         if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../ulog-convert-${{ matrix.target }}.tar.gz ulog-convert
+          tar czf ../../../flight-review-${{ matrix.target }}.tar.gz flight-review
           tar czf ../../../flight-review-server-${{ matrix.target }}.tar.gz flight-review-server
 
       - name: Package (windows)
         if: runner.os == 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../ulog-convert-${{ matrix.target }}.zip ulog-convert.exe
+          7z a ../../../flight-review-${{ matrix.target }}.zip flight-review.exe
           7z a ../../../flight-review-server-${{ matrix.target }}.zip flight-review-server.exe
 
       - name: Upload artifacts
@@ -77,7 +77,7 @@ jobs:
         with:
           name: binaries-${{ matrix.target }}
           path: |
-            ulog-convert-${{ matrix.target }}.*
+            flight-review-${{ matrix.target }}.*
             flight-review-server-${{ matrix.target }}.*
 
   # ---------------------------------------------------------------------------
@@ -214,8 +214,9 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/ulog-convert-*.tar.gz
-            artifacts/ulog-convert-*.zip
+            artifacts/flight-review-x86_64-*.tar.gz
+            artifacts/flight-review-aarch64-*.tar.gz
+            artifacts/flight-review-x86_64-*.zip
             artifacts/flight-review-server-*.tar.gz
             artifacts/flight-review-server-*.zip
             artifacts/flight-review-frontend.tar.gz

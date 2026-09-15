@@ -6,10 +6,10 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 
-# Build release binary with PostgreSQL support by default
+# Build server with PostgreSQL support and the CLI
 ARG SERVER_FEATURES=postgres
 RUN cargo build --release -p flight-review-server --features "$SERVER_FEATURES" \
-    && cargo build --release -p flight-review --bin ulog-convert
+    && cargo build --release -p flight-review --bins
 
 # Runtime image — minimal, no Rust toolchain
 FROM debian:bookworm-slim
@@ -19,7 +19,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/target/release/flight-review-server /usr/local/bin/
-COPY --from=builder /build/target/release/ulog-convert /usr/local/bin/
+COPY --from=builder /build/target/release/flight-review /usr/local/bin/
 
 # Default data directory
 RUN mkdir -p /data/files

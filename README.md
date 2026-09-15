@@ -9,7 +9,7 @@
   - [Converter Crate (`flight-review`)](#converter-crate-flight-review)
   - [Server Crate (`flight-review-server`)](#server-crate-flight-review-server)
   - [Frontend](#frontend)
-  - [CLI Tool (`ulog-convert`)](#cli-tool-ulog-convert)
+  - [CLI Tool (`flight-review`)](#cli-tool-flight-review)
   - [Two Paths](#two-paths)
   - [Workspace Layout](#workspace-layout)
   - [What Gets Stored Per Log](#what-gets-stored-per-log)
@@ -96,39 +96,26 @@ Key technologies:
 - **Chart.js** -- statistical charts on the stats page
 - **TypeScript** throughout
 
-### CLI Tool (`ulog-convert`)
+### CLI Tool (`flight-review`)
 
-`ulog-convert` is a standalone command-line tool for converting, diagnosing, and analyzing PX4 ULog files. No server, no database -- purely file-based. Designed for both individual file processing and batch workflows over entire flight log datasets.
+`flight-review` is an analysis-first command-line tool for PX4 ULog files. Give it a file to analyze one log, or a directory to recursively process its logs in parallel. No subcommand, server, or database is required, and analysis does not write files unless Parquet export is explicitly requested.
 
 Key capabilities:
 
-- **Convert** ULog to per-topic Parquet files with metadata
-- **Diagnose** flight anomalies (motor failure, GPS interference, battery brownout, EKF failure, RC loss)
-- **Analyze** signal processing (PID step response via Wiener deconvolution)
-- **Batch process** directories of ULog files with parallel execution via rayon
+- **Run all analyzers** by default, including diagnostics and PID step response
+- **Explain unavailable results** when data cannot meet an analyzer's criteria
+- **Export** per-topic Parquet files with metadata when requested
+- **Process directories** automatically, using the same options as individual files
 
-Every conversion produces a `manifest.json` that maps the output (source file, topics to Parquet paths, diagnostic results). Batch conversions additionally produce an `index.json` at the output root that indexes all converted logs.
+Every export produces a `manifest.json` that maps the output (source file, topics to Parquet paths, diagnostic results). Directory exports additionally produce an `index.json` at the output root.
 
 ### Two Paths
 
 There are two ways to use the project -- through the server for production deployments, or through the CLI for local and scripted workflows:
 
-```
-                    +-----------------------+
-                    |   .ulg file input     |
-                    +----------+------------+
-                               |
-                    +----------+------------+
-                    |                       |
-              +-----v------+       +--------v--------+
-              | ulog-convert|      | flight-review-  |
-              |   (CLI)    |       |    server        |
-              +-----+------+       +--------+--------+
-                    |                       |
-              Local files            API + Storage
-              (Parquet +             (S3 / local fs
-               metadata.json)        + SQLite/Postgres)
-```
+![PX4 ULog files flow to the CLI for local analysis and optional export, or to the server for hosted review and storage.](docs/architecture.svg)
+
+[Mermaid source](docs/architecture.mmd)
 
 ### Workspace Layout
 
@@ -143,9 +130,8 @@ flight-review-rs/
 │   │   │   ├── analysis.rs     # Flight modes, stats, battery, GPS, vibration, param diff
 │   │   │   ├── diagnostics/    # Diagnostic analyzers (motor, GPS, battery, EKF, RC)
 │   │   │   ├── signal_processing/ # Signal processing framework (PID step response, DSP)
-│   │   │   ├── pid_analysis.rs # Backward-compat facade for signal_processing
 │   │   │   └── bin/
-│   │   │       └── ulog_convert.rs
+│   │   │       └── flight_review.rs # Analysis-first CLI
 │   │   ├── benches/            # Criterion benchmarks
 │   │   ├── tests/fixtures/     # ULog test fixtures (normal + failure cases)
 │   │   └── Cargo.toml
@@ -236,7 +222,7 @@ cargo run -p flight-review-server -- serve \
   --storage "file://data/files"
 
 # Run the CLI
-cargo run -p flight-review --bin ulog-convert -- --help
+cargo run -p flight-review --bin flight-review -- --help
 ```
 
 In a second terminal, start the frontend dev server:
@@ -289,7 +275,7 @@ Key environment variables:
 | `UPLOAD_ONLY` | `false` | Skip downloading, upload existing files from output dir |
 | `RATING_FILTER` | `good\|great` | Pipe-separated ratings to include; `none` for any |
 | `GPS_ONLY` | `true` | Only download logs with GPS-dependent flight modes |
-| `VERIFY` | `true` | Verify each file with `ulog-convert` before uploading |
+| `VERIFY` | `true` | Analyze each downloaded file with `flight-review` before uploading |
 | `MIN_VERSION` | `v1.14` | Minimum PX4 version |
 
 ### Release Build
@@ -439,37 +425,51 @@ Import database records, then pre-convert all logs in the background. Useful for
 
 ## CLI
 
-`ulog-convert` is a standalone command-line tool for converting PX4 ULog files to Parquet and JSON. It can extract metadata, run flight analysis and diagnostics, perform PID step response analysis, and batch-scan directories for anomalies -- all without running the server or touching a database.
+`flight-review <PATH>` analyzes a log and reports flight information and diagnostic findings as JSON. If `PATH` is a directory, it recursively discovers `.ulg` files and processes them in parallel, emitting one JSON record per log. There is no separate batch command. The explicit `analyze` subcommand is equivalent to the default path-only form.
 
 ```bash
-# Single file conversion (produces Parquet + metadata.json + manifest.json)
-ulog-convert flight.ulg output_dir/
+# Analyze one log; no files are written
+flight-review flight.ulg
+flight-review analyze flight.ulg
 
-# Metadata + diagnostics only (JSON to stdout)
-ulog-convert --metadata-only flight.ulg
+# Analyze a directory recursively, using the same options
+flight-review logs/
+flight-review logs/ --jobs 4
 
-# Compact JSON (for scripting)
-ulog-convert --metadata-only --output-format compact flight.ulg | jq .
+# Compact JSON is the default (one record per log)
+flight-review flight.ulg > report.json
+flight-review logs/ > reports.jsonl
 
-# Signal processing analysis
-ulog-convert analyze flight.ulg
-ulog-convert analyze flight.ulg -m pid_step_response
+# Format JSON for inspection with jq
+flight-review flight.ulg | jq .
 
-# Batch: convert a directory to Parquet (parallel, produces index.json)
-ulog-convert batch logs/ -o dataset/
+# Run just one analyzer, using the same ID list for diagnostics and PID
+flight-review flight.ulg --analyzer pid_step_response
+flight-review logs/ --analyzer gps_interference
 
-# Batch: scan for anomalies
-ulog-convert batch logs/ --diagnostics-only
+# Explicitly exclude analyzers; all others still run
+flight-review logs/ --exclude pid_step_response
+flight-review logs/ --exclude gps_interference,ekf_failure
 
-# Batch: convert + diagnose + analyze
-ulog-convert batch logs/ -o dataset/ --diagnostics --analyze
+# Analyze and also export Parquet, metadata.json, and manifest.json
+flight-review flight.ulg --export-parquet output/
+flight-review logs/ --export-parquet dataset/
 
-# Batch: filter to specific analyzers
-ulog-convert batch logs/ --diagnostics-only --analyzer gps_interference,ekf_failure
+# Explicit conversion accepts either a file or a directory
+flight-review convert flight.ulg --output output/
+flight-review convert logs/ --output dataset/
 
-# JSON output for scripting
-ulog-convert batch logs/ --diagnostics-only --format json
+# Discover all analyzer IDs and descriptions as JSON
+flight-review list
 ```
+
+Every registered analyzer runs by default, including PID step response. `--analyzer <ID>` runs only the named analyzer; `--exclude <IDs>` runs everything except the comma-separated IDs. These options are mutually exclusive, and exclusions must leave at least one analyzer selected. Selection controls execution and exported diagnostic findings, not just display filtering. Excluded or unselected analyzers are omitted from the outcome maps.
+
+Data output is always compact JSON; directory output is newline-delimited JSON (NDJSON) in stable path order. There is no output-format option or text/table report. Reports use the same structure for a file and a directory, and `list` also returns compact JSON. Pipe output to `jq .` when you want indentation. Standard help/version output remains text, and operational error messages go to stderr. `--jobs` accepts 1 through 256 workers.
+
+Processing failures produce a nonzero exit status, including a directory containing both successful and failed logs. Finding an anomaly is not itself an execution failure. Empty directories, invalid paths, and unknown analyzer IDs are errors. A recoverable truncated or malformed log can still produce a report from its valid prefix; inspect `summary.completeness` before treating the report as complete.
+
+An analyzer is still attempted when its input is incomplete or unsuitable. An `unavailable` outcome explains why it could not produce a useful result, rather than reporting a healthy flight or silently omitting the analyzer. For example, PID reports insufficient samples, insufficient sampling rate or overlap, gaps/nonfinite data, or too few windows meeting excitation and response-quality criteria. Such outcomes are not execution failures. Diagnostic thresholds remain heuristics rather than independently verified physical diagnoses.
 
 ### Conversion Output
 
@@ -484,19 +484,24 @@ output/
 └── ...
 ```
 
-Batch conversions add an `index.json` at the output root:
+Directory exports add an `index.json` at the output root. The new CLI preserves each source-relative path, including the `.ulg` filename, as a per-log directory so matching basenames in different folders do not overwrite each other:
 
 ```
 dataset/
 ├── index.json                 # indexes all logs with manifest paths
-├── sample/
+├── sample.ulg/
 │   ├── manifest.json
 │   ├── metadata.json
 │   └── *.parquet
-├── motor_failure/
-│   ├── manifest.json
-│   └── ...
+└── other-flight/
+    └── sample.ulg/
+        ├── manifest.json
+        └── ...
 ```
+
+Uppercase and nonportable filename bytes are percent-escaped to avoid collisions on case-insensitive filesystems: for example, `a.ULG` exports into `a.%55%4C%47/`, while `a.ulg` stays unchanged. A source directory named `index.json` at the input root becomes `%69ndex.json` to reserve the dataset index filename. Follow the index's `path` and `manifest` fields rather than reconstructing output paths. Input paths must be valid UTF-8; unsupported paths produce per-log errors without suppressing other logs.
+
+Export destinations must be new or empty, must not overlap the input path, and must not traverse symlinks. The CLI refuses unsafe destinations instead of overwriting an existing dataset. Directory indexes retain failed entries with an explicit `outcome` and `error`; their `path` and `manifest` can be null.
 
 ## Upload Context Fields
 
@@ -526,7 +531,7 @@ Flight Review automatically detects flight anomalies during upload. Diagnostic a
 
 | Analyzer | Detects | Severity | Topics |
 |----------|---------|----------|--------|
-| `motor_failure` | PWM drop to zero or locked at max while armed | Critical/Warning | `actuator_outputs`, `vehicle_status` |
+| `motor_failure` | Observed actuator command drops to zero while armed; not proof of physical motor failure | Warning | `actuator_outputs`, `vehicle_status` |
 | `gps_interference` | EPH/EPV spikes, satellite count drops | Critical/Warning | `vehicle_gps_position` |
 | `battery_brownout` | Voltage below critical threshold during flight | Critical | `battery_status`, `vehicle_status` |
 | `ekf_failure` | Sustained EKF innovation test ratio exceedance | Critical/Warning | `estimator_status` |
@@ -562,18 +567,18 @@ Convert ULog files to Parquet and work with them using your existing tools (pola
 
 ```bash
 # Convert a directory of flight logs to Parquet
-ulog-convert batch logs/ -o dataset/ --diagnostics
+flight-review convert logs/ --output dataset/
 
 # Output structure:
 # dataset/
 # ├── index.json              ← entry point: lists all logs
-# ├── log_001/
+# ├── log_001.ulg/
 # │   ├── manifest.json       ← file map + diagnostic labels
 # │   ├── metadata.json       ← full flight metadata
 # │   ├── vehicle_attitude.parquet
 # │   ├── sensor_combined.parquet
 # │   └── ...
-# └── log_002/
+# └── log_002.ulg/
 #     └── ...
 ```
 
@@ -586,14 +591,18 @@ import json, polars as pl
 with open("dataset/index.json") as f:
     index = json.load(f)
 
-# Find logs with motor failures
-crashes = [log for log in index["logs"] if log["diagnostic_count"] > 0]
+# Find logs with diagnostic findings to investigate
+flagged = [
+    log for log in index["logs"]
+    if log["path"] is not None and log["diagnostic_count"] > 0
+]
 
 # Load a specific topic as a dataframe
-df = pl.read_parquet(f"dataset/{crashes[0]['path']}/vehicle_attitude.parquet")
+if flagged:
+    df = pl.read_parquet(f"dataset/{flagged[0]['path']}/vehicle_attitude.parquet")
 ```
 
-The diagnostic labels in each `manifest.json` provide pre-computed anomaly annotations with timestamps and severity -- usable as training labels for supervised learning without manually reviewing flights.
+Each `manifest.json` includes diagnostic findings with timestamps and severity. These heuristic annotations can help prioritize review, but are not ground-truth training labels without independent validation.
 
 ### Path 2: Rust-native signal processing modules
 
@@ -601,10 +610,10 @@ For analyses that need to run at scale across thousands of logs, or that you wan
 
 ```bash
 # Run signal processing on a single file
-ulog-convert analyze flight.ulg
+flight-review flight.ulg --analyzer pid_step_response
 
-# Batch across a directory (parallel)
-ulog-convert batch logs/ --analyze -m pid_step_response
+# Process a directory automatically (parallel)
+flight-review logs/ --analyzer pid_step_response
 ```
 
 #### Available Modules

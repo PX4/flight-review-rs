@@ -39,10 +39,14 @@ jobs:
         run: |
           docker create --name test-container flight-review:test
           docker cp test-container:/usr/local/bin/flight-review-server /tmp/flight-review-server
-          docker cp test-container:/usr/local/bin/ulog-convert /tmp/ulog-convert
+          docker cp test-container:/usr/local/bin/flight-review /tmp/flight-review
           docker rm test-container
           file /tmp/flight-review-server
-          file /tmp/ulog-convert
+          file /tmp/flight-review
+
+      - name: Verify CLI entry point
+        run: |
+          docker run --rm --entrypoint flight-review flight-review:test --help
 
       - name: Verify server starts
         run: |

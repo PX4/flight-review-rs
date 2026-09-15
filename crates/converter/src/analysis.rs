@@ -395,6 +395,15 @@ impl PositionStats {
 /// summaries select ULog instance zero rather than pooling independent sensors
 /// or estimator coordinate frames. Diagnostics still receive every instance.
 pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, std::io::Error> {
+    analyze_with_analyzers(path, metadata, crate::diagnostics::create_analyzers())
+}
+
+/// Analyze flight statistics while executing only the supplied diagnostics.
+pub fn analyze_with_analyzers(
+    path: &str,
+    metadata: &FlightMetadata,
+    mut analyzers: Vec<Box<dyn crate::diagnostics::Analyzer>>,
+) -> Result<FlightAnalysis, std::io::Error> {
     let mut analysis = FlightAnalysis::default();
 
     // --- Non-default params (from metadata, no file pass needed) ---
@@ -452,7 +461,6 @@ pub fn analyze(path: &str, metadata: &FlightMetadata) -> Result<FlightAnalysis, 
     let mut mode_changes: Vec<(u64, u8)> = Vec::new();
 
     // Diagnostic analyzers — piggyback on the same streaming pass
-    let mut analyzers = crate::diagnostics::create_analyzers();
     let diagnostic_topics: HashSet<String> = analyzers
         .iter()
         .flat_map(|a| a.required_topics().iter().map(|s| s.to_string()))

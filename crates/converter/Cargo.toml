@@ -2,7 +2,8 @@
 name = "flight-review"
 version = "0.1.0"
 edition = "2021"
-description = "Flight Review v2 — ULog to Parquet conversion and metadata extraction"
+default-run = "flight-review"
+description = "Understand flight performance and investigate issues in PX4 flight logs"
 license = "MIT"
 repository = "https://github.com/PX4/flight-review-rs"
 keywords = ["px4", "ulog", "parquet", "flight-review", "drone"]
@@ -21,8 +22,8 @@ rayon = "1"
 walkdir = "2"
 
 [[bin]]
-name = "ulog-convert"
-path = "src/bin/ulog_convert.rs"
+name = "flight-review"
+path = "src/bin/flight_review.rs"
 
 [[bench]]
 name = "convert"
