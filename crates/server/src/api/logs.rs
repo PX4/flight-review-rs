@@ -130,6 +130,79 @@ pub struct TrackPointCompact {
     pub m: u8, // mode_id, short name to minimize payload
 }
 
+/// GET /api/logs/:id/download -- download the original ULog file.
+pub async fn download_log(
+    State(state): State<Arc<crate::AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<impl IntoResponse, ApiError> {
+    let record = state.db.get(id).await?.ok_or(ApiError::NotFound)?;
+
+    let mut candidates = vec![record.filename.clone()];
+    let uuid_filename = format!("{id}.ulg");
+    if !candidates.iter().any(|name| name == &uuid_filename) {
+        candidates.push(uuid_filename);
+    }
+
+    for filename in &candidates {
+        if let Ok(data) = state.storage.get_file(id, filename).await {
+            return Ok(ulog_download_response(filename, data));
+        }
+    }
+
+    if state.v1_ulg_prefix.is_some() && lazy_convert(&state, id).await? {
+        for filename in &candidates {
+            if let Ok(data) = state.storage.get_file(id, filename).await {
+                return Ok(ulog_download_response(filename, data));
+            }
+        }
+    }
+
+    let files = state
+        .storage
+        .list_files(id)
+        .await
+        .map_err(|_| ApiError::NotFound)?;
+    if let Some(filename) = files
+        .into_iter()
+        .find(|name| name.to_lowercase().ends_with(".ulg"))
+    {
+        let data = state
+            .storage
+            .get_file(id, &filename)
+            .await
+            .map_err(|_| ApiError::NotFound)?;
+        return Ok(ulog_download_response(&filename, data));
+    }
+
+    Err(ApiError::NotFound)
+}
+
+fn ulog_download_response(filename: &str, data: Bytes) -> axum::response::Response {
+    let safe_filename = filename
+        .chars()
+        .map(|ch| {
+            if ch.is_control() || matches!(ch, '"' | '\\' | '/') {
+                '_'
+            } else {
+                ch
+            }
+        })
+        .collect::<String>();
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{safe_filename}\""),
+            ),
+            (header::CONTENT_LENGTH, data.len().to_string()),
+        ],
+        data,
+    )
+        .into_response()
+}
+
 /// GET /api/logs/:id/data/:filename -- serve Parquet/metadata files
 /// Supports HTTP Range requests for DuckDB-WASM compatibility.
 /// If the file does not exist in v2 storage but a v1 ULG prefix is configured,

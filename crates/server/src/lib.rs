@@ -43,6 +43,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
             get(api::logs::get_log).delete(api::logs::delete_log),
         )
         .route("/api/logs/{id}/track", get(api::logs::get_track))
+        .route("/api/logs/{id}/download", get(api::logs::download_log))
         .route(
             "/api/logs/{id}/data/{filename}",
             get(api::logs::get_log_file),

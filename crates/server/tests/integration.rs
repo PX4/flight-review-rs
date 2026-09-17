@@ -238,7 +238,22 @@ async fn test_full_lifecycle() {
     let ulg_size = resp.bytes().await.unwrap().len();
     assert!(ulg_size > 1_000_000, "ULG should be > 1MB");
 
-    // 8. Stats endpoint
+    // 8. Download original .ulg file
+    let resp = client
+        .get(format!("{}/api/logs/{}/download", base_url, log_id))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    assert_eq!(
+        resp.headers()
+            .get("content-disposition")
+            .and_then(|value| value.to_str().ok()),
+        Some("attachment; filename=\"sample.ulg\"")
+    );
+    assert_eq!(resp.bytes().await.unwrap().len(), ulg_size);
+
+    // 9. Stats endpoint
     let resp = client
         .get(format!("{}/api/stats?group_by=ver_hw&period=all", base_url))
         .send()
@@ -250,7 +265,7 @@ async fn test_full_lifecycle() {
     assert!(stats["data"].as_array().unwrap().len() > 0);
     assert_eq!(stats["data"][0]["group"], "AUAV_X21");
 
-    // 9. Search filters
+    // 10. Search filters
     let resp = client
         .get(format!("{}/api/logs?sys_name=PX4&has_gps=false", base_url))
         .send()
@@ -261,7 +276,7 @@ async fn test_full_lifecycle() {
     // sample.ulg may or may not have GPS — just verify the filter doesn't error
     assert!(filtered["total"].as_i64().is_some());
 
-    // 10. Delete with wrong token — should fail
+    // 11. Delete with wrong token — should fail
     let resp = client
         .delete(format!("{}/api/logs/{}?token=wrongtoken", base_url, log_id))
         .send()
@@ -269,7 +284,7 @@ async fn test_full_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), 403, "Wrong token should be forbidden");
 
-    // 11. Delete with correct token
+    // 12. Delete with correct token
     let resp = client
         .delete(format!(
             "{}/api/logs/{}?token={}",
@@ -280,7 +295,7 @@ async fn test_full_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), 204, "Correct token should succeed");
 
-    // 12. Verify deleted
+    // 13. Verify deleted
     let resp = client
         .get(format!("{}/api/logs/{}", base_url, log_id))
         .send()
@@ -288,7 +303,7 @@ async fn test_full_lifecycle() {
         .unwrap();
     assert_eq!(resp.status(), 404, "Deleted log should return 404");
 
-    // 13. List should be empty
+    // 14. List should be empty
     let resp = client
         .get(format!("{}/api/logs", base_url))
         .send()
