@@ -586,7 +586,7 @@ fn broken_stdout_is_a_reported_failure_not_a_panic() {
 }
 
 #[test]
-fn nonfinite_metadata_is_an_explicit_export_error() {
+fn nonfinite_parameter_exports_as_null() {
     let root = workspace();
     let mut bytes = fs::read(fixture()).unwrap();
     let key = b"float CLI_TEST";
@@ -601,10 +601,13 @@ fn nonfinite_metadata_is_an_explicit_export_error() {
         root.path(),
         &["convert", "nonfinite.ulg", "--output", "export"],
     );
-    assert!(!output.status.success());
+    assert!(output.status.success());
     let record = &records(&output)[0];
-    assert_eq!(record["outcome"], "error");
-    assert!(record["error"].as_str().unwrap().contains("nonfinite"));
+    assert_eq!(record["outcome"], "exported");
+    let metadata: Value =
+        serde_json::from_slice(&fs::read(root.path().join("export/metadata.json")).unwrap())
+            .unwrap();
+    assert!(metadata["parameters"]["CLI_TEST"].is_null());
 }
 
 fn message(log: &mut Vec<u8>, kind: u8, payload: &[u8]) {

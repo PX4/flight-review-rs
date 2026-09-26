@@ -57,7 +57,8 @@ pub fn worker_pool(jobs: Option<usize>) -> Result<rayon::ThreadPool, String> {
 /// Reject nonfinite numbers rather than serde_json's implicit conversion to null.
 /// Value's sorted object keys also make machine reports reproducible.
 pub fn json<T: Serialize + ?Sized>(value: &T, pretty: bool) -> Result<String, String> {
-    value.serialize(finite::Finite).map_err(|e| e.to_string())?;
+    serde_path_to_error::serialize(value, finite::Finite)
+        .map_err(|e| format!("{} at {}", e.inner(), e.path()))?;
     let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
     if pretty {
         serde_json::to_string_pretty(&value)
@@ -201,6 +202,40 @@ mod tests {
             )
             .unwrap(),
             r#"{"values":[null,1.0]}"#
+        );
+    }
+
+    #[test]
+    fn nonfinite_error_names_the_path() {
+        #[derive(Serialize)]
+        struct Stats {
+            mean: f64,
+        }
+        #[derive(Serialize)]
+        struct Report {
+            stats: Vec<Stats>,
+            by_name: std::collections::BTreeMap<&'static str, f64>,
+        }
+        let error = json(
+            &Report {
+                stats: vec![Stats { mean: 1.0 }, Stats { mean: f64::NAN }],
+                by_name: Default::default(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(error, "nonfinite number in JSON output at stats[1].mean");
+        let error = json(
+            &Report {
+                stats: vec![],
+                by_name: [("BAT_A_PER_V", f64::INFINITY)].into(),
+            },
+            false,
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "nonfinite number in JSON output at by_name.BAT_A_PER_V"
         );
     }
 
