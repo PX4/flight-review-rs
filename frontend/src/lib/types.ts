@@ -100,9 +100,10 @@ export interface FlightMetadata {
   dropout_count: number;
   logged_messages: LogEntry[];
   tagged_logged_messages: TaggedLogEntry[];
-  parameters: Record<string, number>;
+  // Nonfinite float params (e.g. uncalibrated BAT_A_PER_V = inf) arrive as null.
+  parameters: Record<string, number | null>;
   changed_parameters: ChangedParam[];
-  default_parameters: Record<string, number>;
+  default_parameters: Record<string, number | null>;
   analysis: FlightAnalysis | null;
   multi_info?: Record<string, string[]>;
 }
@@ -127,7 +128,7 @@ export interface TaggedLogEntry {
 
 export interface ChangedParam {
   name: string;
-  value: number;
+  value: number | null;
   in_flight: boolean;
 }
 

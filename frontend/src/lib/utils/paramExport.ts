@@ -32,11 +32,14 @@ function formatValue(value: number): string {
 
 /** Build the contents of a QGC `.params` file from a parameter dictionary. */
 export function buildQgcParamsFile(
-  parameters: Record<string, number>,
+  parameters: Record<string, number | null>,
   options: ParamFileOptions = {}
 ): string {
   const { sysName, vehicleId = 1, componentId = 1 } = options;
-  const names = Object.keys(parameters).sort();
+  // QGC cannot load a nonfinite value, so skip params the log stored as inf/NaN.
+  const names = Object.keys(parameters)
+    .filter((name) => parameters[name] != null)
+    .sort();
 
   const header = [
     `# Onboard parameters for Vehicle ${sysName ?? vehicleId}`,
@@ -45,7 +48,7 @@ export function buildQgcParamsFile(
   ];
 
   const rows = names.map((name) =>
-    [vehicleId, componentId, name, formatValue(parameters[name]), MAV_PARAM_TYPE_REAL32].join('\t')
+    [vehicleId, componentId, name, formatValue(parameters[name]!), MAV_PARAM_TYPE_REAL32].join('\t')
   );
 
   return header.concat(rows).join('\n') + '\n';

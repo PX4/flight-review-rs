@@ -9,9 +9,12 @@
 	}: {
 		diffs: ParamDiff[];
 		changedParams: ChangedParam[];
-		allParameters?: Record<string, number>;
-		defaultParameters?: Record<string, number>;
+		allParameters?: Record<string, number | null>;
+		defaultParameters?: Record<string, number | null>;
 	} = $props();
+
+	// Nonfinite params (e.g. BAT_A_PER_V = inf) arrive as null in the "all" view.
+	type ParamRow = { name: string; value: number | null; default: number | null };
 
 	type ViewMode = 'non-default' | 'in-flight' | 'all';
 	type SortKey = 'name' | 'value' | 'default' | 'delta';
@@ -28,7 +31,7 @@
 	);
 
 	// Build full parameter list for "all" view
-	let allParamDiffs = $derived.by((): ParamDiff[] => {
+	let allParamDiffs = $derived.by((): ParamRow[] => {
 		return Object.entries(allParameters).map(([name, value]) => ({
 			name,
 			value,
@@ -36,10 +39,15 @@
 		}));
 	});
 
-	function getDeltaPct(diff: ParamDiff): number {
+	function getDeltaPct(diff: ParamRow): number {
 		if (diff.value == null || diff.default == null) return 0;
 		if (diff.default === 0) return diff.value === 0 ? 0 : 100;
 		return Math.abs((diff.value - diff.default) / diff.default) * 100;
+	}
+
+	function compareNullable(a: number | null, b: number | null): number {
+		if (a == null || b == null) return (a == null ? 0 : 1) - (b == null ? 0 : 1);
+		return a - b;
 	}
 
 	function getDeltaColor(pct: number): string {
@@ -51,7 +59,7 @@
 	let filteredDiffs = $derived.by(() => {
 		const query = searchText.toLowerCase();
 
-		let source: ParamDiff[];
+		let source: ParamRow[];
 		switch (viewMode) {
 			case 'in-flight':
 				source = diffs.filter((d) => inFlightNames.has(d.name));
@@ -71,9 +79,9 @@
 				case 'name':
 					return dir * a.name.localeCompare(b.name);
 				case 'value':
-					return dir * (a.value - b.value);
+					return dir * compareNullable(a.value, b.value);
 				case 'default':
-					return dir * (a.default - b.default);
+					return dir * compareNullable(a.default, b.default);
 				case 'delta':
 					return dir * (getDeltaPct(a) - getDeltaPct(b));
 				default:

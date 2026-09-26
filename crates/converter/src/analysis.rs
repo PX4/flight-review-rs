@@ -429,7 +429,7 @@ pub fn analyze_with_analyzers(
     let mut max_tilt_rad: f32 = 0.0f32;
 
     // Angular velocity
-    let mut max_rotation_speed_rad_s: f32 = 0.0f32;
+    let mut max_rotation_speed_rad_s: f64 = 0.0;
 
     // Battery
     let mut current_sum: f64 = 0.0;
@@ -635,7 +635,10 @@ pub fn analyze_with_analyzers(
                         let wy = y_p.parse(data.data);
                         let wz = z_p.parse(data.data);
                         if wx.is_finite() && wy.is_finite() && wz.is_finite() {
-                            let rot_speed = ((wx * wx + wy * wy + wz * wz) as f64).sqrt() as f32;
+                            // Square in f64: corrupt samples (~1e32 rad/s seen in
+                            // real logs) overflow f32 to inf.
+                            let (wx, wy, wz) = (wx as f64, wy as f64, wz as f64);
+                            let rot_speed = (wx * wx + wy * wy + wz * wz).sqrt();
                             if rot_speed > max_rotation_speed_rad_s {
                                 max_rotation_speed_rad_s = rot_speed;
                             }
@@ -865,7 +868,7 @@ pub fn analyze_with_analyzers(
         analysis.stats.avg_speed_m_s = position.speed_sum / position.speed_count as f64;
     }
     analysis.stats.max_tilt_deg = max_tilt_rad.to_degrees() as f64;
-    analysis.stats.max_rotation_speed_deg_s = max_rotation_speed_rad_s.to_degrees() as f64;
+    analysis.stats.max_rotation_speed_deg_s = max_rotation_speed_rad_s.to_degrees();
 
     // --- Finalize battery ---
     if has_battery_data {
@@ -967,6 +970,11 @@ fn compute_non_default_params(metadata: &FlightMetadata, analysis: &mut FlightAn
                 (ParamValue::Float(v), ParamValue::Int32(d)) => (*v as f64, *d as f64),
                 (ParamValue::Int32(v), ParamValue::Float(d)) => (*v as f64, *d as f64),
             };
+
+            // A nonfinite value or default has no meaningful difference.
+            if !val_f64.is_finite() || !def_f64.is_finite() {
+                continue;
+            }
 
             if (val_f64 - def_f64).abs() > f64::EPSILON {
                 analysis.non_default_params.push(ParamDiff {
@@ -1074,6 +1082,56 @@ mod tests {
             "PX4 transition flag is bool"
         );
         assert_eq!(analysis.vtol_states.last().unwrap().end_us, 728_940_452);
+    }
+
+    #[test]
+    fn non_default_params_skip_nonfinite_values() {
+        let mut metadata = FlightMetadata::default();
+        for (name, value, default) in [
+            ("BAT_A_PER_V", f32::INFINITY, 15.39),
+            ("BAT_V_DIV", f32::NAN, 10.18),
+            ("BAT_N_CELLS", 4.0, f32::NAN),
+            ("MPC_XY_P", 0.95, 1.0),
+        ] {
+            metadata
+                .parameters
+                .insert(name.into(), ParamValue::Float(value));
+            metadata
+                .default_parameters
+                .insert(name.into(), ParamValue::Float(default));
+        }
+        let mut analysis = FlightAnalysis::default();
+        compute_non_default_params(&metadata, &mut analysis);
+        let names: Vec<_> = analysis
+            .non_default_params
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        assert_eq!(names, ["MPC_XY_P"]);
+    }
+
+    #[test]
+    fn corrupt_angular_velocity_does_not_overflow() {
+        let records = [1_000_000, 2_000_000]
+            .into_iter()
+            .map(|ts| {
+                let (_, bytes) = MessageBuilder::new("vehicle_angular_velocity")
+                    .timestamp(ts)
+                    .field_f32("xyz[0]", 1.2e32)
+                    .field_f32("xyz[1]", -1.2e32)
+                    .field_f32("xyz[2]", 1.2e32)
+                    .build();
+                (1, bytes)
+            })
+            .collect::<Vec<_>>();
+        let analysis = synthetic_analysis(
+            1,
+            &["vehicle_angular_velocity:uint64_t timestamp;float[3] xyz;"],
+            &[(1, 0, "vehicle_angular_velocity")],
+            &records,
+        );
+        let max = analysis.stats.max_rotation_speed_deg_s;
+        assert!(max.is_finite() && max > 1e34, "{max}");
     }
 
     #[test]

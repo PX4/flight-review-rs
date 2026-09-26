@@ -44,11 +44,40 @@ fn log_level_to_string(log_level: u8) -> &'static str {
 }
 
 /// Parameter value (int32 or float)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 pub enum ParamValue {
     Int32(i32),
     Float(f32),
+}
+
+/// Logs can carry nonfinite float parameters (e.g. an uncalibrated
+/// `BAT_A_PER_V = inf`). JSON cannot represent them, so they serialize as
+/// `null` and read back as NaN.
+impl Serialize for ParamValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match *self {
+            ParamValue::Int32(v) => serializer.serialize_i32(v),
+            ParamValue::Float(v) if v.is_finite() => serializer.serialize_f32(v),
+            ParamValue::Float(_) => serializer.serialize_none(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ParamValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Int32(i32),
+            Float(f32),
+            Null(()),
+        }
+        Ok(match Repr::deserialize(deserializer)? {
+            Repr::Int32(v) => ParamValue::Int32(v),
+            Repr::Float(v) => ParamValue::Float(v),
+            Repr::Null(()) => ParamValue::Float(f32::NAN),
+        })
+    }
 }
 
 /// A parameter change recorded during flight
@@ -481,6 +510,22 @@ mod tests {
         // Just verify they were parsed (not left as default if file has non-zero flags)
         assert_eq!(meta.compat_flags.len(), 8);
         assert_eq!(meta.incompat_flags.len(), 8);
+    }
+
+    #[test]
+    fn nonfinite_float_parameters_round_trip_as_null() {
+        let params = [
+            ParamValue::Float(f32::INFINITY),
+            ParamValue::Float(f32::NAN),
+            ParamValue::Float(1.5),
+            ParamValue::Int32(3),
+        ];
+        let json = serde_json::to_string(&params).unwrap();
+        assert_eq!(json, "[null,null,1.5,3]");
+        let back: Vec<ParamValue> = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back[0], ParamValue::Float(v) if v.is_nan()));
+        assert!(matches!(back[2], ParamValue::Float(v) if v == 1.5));
+        assert!(matches!(back[3], ParamValue::Int32(3)));
     }
 
     #[test]
