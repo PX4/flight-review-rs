@@ -1,5 +1,16 @@
 import type { AsyncDuckDB, AsyncDuckDBConnection, DuckDBBundles } from '@duckdb/duckdb-wasm';
 
+/**
+ * Plottable (numeric) result columns, by declared type rather than values —
+ * robust for computed/aliased and all-null columns. Matches stable Arrow
+ * type ids (no apache-arrow import): Int=2, Float=3, Bool=6, Decimal=7.
+ */
+const NUMERIC_ARROW_TYPE_IDS = new Set<number>([2, 3, 6, 7]);
+
+function isNumericField(field: { typeId: number }): boolean {
+  return NUMERIC_ARROW_TYPE_IDS.has(field.typeId);
+}
+
 let dbInstance: AsyncDuckDB | null = null;
 
 // Same-origin bundle map. Files are served from /duckdb/* — by the Vite dev
@@ -74,6 +85,18 @@ function columnToFloat64(col: { length: number; get(i: number): unknown }): Floa
     out[i] = Number(col.get(i));
   }
   return out;
+}
+
+/**
+ * Resolve bare topic refs — `read_parquet('sensor_mag')` or
+ * `('sensor_mag.parquet')` — to the log's absolute Parquet URL, keeping raw
+ * SQL log-agnostic. Full URLs/paths pass through. Exported for testability.
+ */
+export function resolveTopicRefs(sql: string, baseUrl: string): string {
+  return sql.replace(
+    /read_parquet\(\s*'([A-Za-z_][A-Za-z0-9_]*)(?:\.parquet)?'\s*\)/g,
+    (_m, stem) => `read_parquet('${window.location.origin}${baseUrl}/${stem}.parquet')`
+  );
 }
 
 export class LogSession {
@@ -158,6 +181,63 @@ export class LogSession {
       console.error(`Schema query failed for ${topic}:`, e);
       return [];
     }
+  }
+
+  /**
+   * Run arbitrary SQL (body unrestricted; topic refs resolved by
+   * `resolveTopicRefs`, `timestamp` stays UINT64 — cast it for window
+   * frames). Only the result columns follow a chart contract: x = the
+   * `timestamp` column (µs→s) or else the first column, which must be
+   * numeric; every other numeric column is a series labelled by name,
+   * non-numeric columns are skipped. Returns null on zero rows; throws
+   * DuckDB/shape errors for the caller to surface.
+   */
+  async querySql(
+    sql: string
+  ): Promise<{ x: Float64Array; series: Float64Array[]; labels: string[]; xIsTime: boolean } | null> {
+    const conn = await this.getConnection();
+    const result = await conn.query(resolveTopicRefs(sql, this.baseUrl));
+    if (result.numRows === 0) return null;
+
+    const fields = result.schema.fields as Array<{ name: string; typeId: number; type: unknown }>;
+    if (fields.length < 2) {
+      throw new Error('Query must return at least 2 columns: an x-axis column plus one or more series.');
+    }
+
+    const tsIdx = fields.findIndex((f) => f.name === 'timestamp');
+    const xIdx = tsIdx >= 0 ? tsIdx : 0;
+    const xField = fields[xIdx];
+    if (!isNumericField(xField)) {
+      throw new Error(
+        `x-axis column "${xField.name}" is not numeric (${String(xField.type)}). ` +
+          `Put a numeric column first, or name your time column "timestamp".`
+      );
+    }
+    // Index-based access throughout: name lookups return the first match, so
+    // duplicate column names (common in joins) would alias the wrong data.
+    const xCol = result.getChildAt(xIdx);
+    if (!xCol) {
+      throw new Error(`Failed to read x-axis column "${xField.name}" from the result.`);
+    }
+    // Only a column literally named `timestamp` joins the shared time axis /
+    // cross-plot sync; any other x would corrupt the shared seconds range.
+    const xIsTime = xField.name === 'timestamp';
+    const x = xIsTime ? microsToSeconds(xCol) : columnToFloat64(xCol);
+
+    const series: Float64Array[] = [];
+    const labels: string[] = [];
+    fields.forEach((field, i) => {
+      if (i === xIdx) return;
+      if (!isNumericField(field)) return;
+      const col = result.getChildAt(i);
+      if (!col) return;
+      series.push(columnToFloat64(col));
+      labels.push(field.name);
+    });
+    if (series.length === 0) {
+      throw new Error('Query returned no numeric columns to plot beyond the x-axis.');
+    }
+    return { x, series, labels, xIsTime };
   }
 
   close(): void {

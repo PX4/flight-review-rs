@@ -3,6 +3,7 @@
 	import type { FlightMetadata, PlotConfig } from '$lib/types';
 	import { activePlots } from '$lib/stores/logViewer';
 	import { savePlotLayout, loadPlotLayout } from '$lib/utils/plotPersistence';
+	import { buildDefaultSqlPlots, reconcileDefaultSqlPlots } from '$lib/plots/defaultSqlPlots';
 	import DragDropPlotList from '$lib/components/viewer/DragDropPlotList.svelte';
 
 	const ctx = getContext<{ metadata: FlightMetadata; logId: string }>('log-viewer');
@@ -123,6 +124,9 @@
 			plots.push(makeAccelSpectrogramPlot());
 		}
 
+		// Repo-committed SQL plots last, gated on the topics each query requires.
+		plots.push(...buildDefaultSqlPlots(availableTopics));
+
 		return plots;
 	}
 
@@ -134,7 +138,11 @@
 			const saved = loadPlotLayout(ctx.logId);
 			const availableTopics = new Set(Object.keys(ctx.metadata.topics));
 			if (saved && saved.length > 0) {
-				const valid = saved.filter((p) => availableTopics.has(p.topic));
+				// Drop timeseries plots whose topic is gone; sql/xy/spectrogram don't
+				// map to a single topic and error visibly at query time instead.
+				const valid = saved.filter(
+					(p) => (p.kind && p.kind !== 'timeseries') || availableTopics.has(p.topic)
+				);
 				if (valid.length > 0) {
 					// Prepend the trajectory plot if missing from saved layout (so existing
 					// users pick up the new default the first time they reopen a log).
@@ -151,7 +159,9 @@
 					) {
 						valid.push(makeAccelSpectrogramPlot());
 					}
-					activePlots.set(valid);
+					// Registry SQL plots: repo definitions overwrite saved copies;
+					// new entries are appended.
+					activePlots.set(reconcileDefaultSqlPlots(valid, availableTopics));
 				} else {
 					activePlots.set(buildDefaultPlots(ctx.metadata));
 				}

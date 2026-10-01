@@ -31,6 +31,10 @@ export function togglePlotMinimized(plotId: string): void {
   );
 }
 
+/** When set, the plot builder opens in "edit" mode for this SQL plot,
+ *  loading its SQL back into the editor. Cleared once consumed. */
+export const editSqlPlot = writable<Pick<PlotConfig, 'id' | 'sql' | 'yLabel'> | null>(null);
+
 export const sidebarCollapsed = writable(false);
 export const activePanel = writable<'plots' | 'map' | 'messages' | 'params'>('plots');
 export const builderOpen = writable(false);

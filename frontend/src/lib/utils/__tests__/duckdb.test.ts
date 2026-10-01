@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { buildParquetUrl, microsToSeconds } from '../duckdb';
+import { describe, it, expect } from 'vitest';
+import { buildParquetUrl, microsToSeconds, resolveTopicRefs } from '../duckdb';
 
 describe('buildParquetUrl', () => {
   it('builds URL for single-instance topic (multiId=0)', () => {
@@ -55,6 +55,59 @@ describe('microsToSeconds', () => {
     const result = microsToSeconds(fakeCol);
     expect(result[0]).toBeCloseTo(5.0);
     expect(result[1]).toBeCloseTo(10.0);
+  });
+});
+
+describe('resolveTopicRefs', () => {
+  const base = '/api/logs/log-a/data';
+  const url = (f: string) => `${window.location.origin}${base}/${f}`;
+
+  it('resolves a bare topic name', () => {
+    expect(resolveTopicRefs("SELECT * FROM read_parquet('sensor_mag')", base)).toBe(
+      `SELECT * FROM read_parquet('${url('sensor_mag.parquet')}')`
+    );
+  });
+
+  it('resolves a .parquet-suffixed name to the same URL', () => {
+    expect(resolveTopicRefs("FROM read_parquet('sensor_mag.parquet')", base)).toBe(
+      `FROM read_parquet('${url('sensor_mag.parquet')}')`
+    );
+  });
+
+  it('resolves multi-instance names', () => {
+    expect(resolveTopicRefs("FROM read_parquet('sensor_accel_1')", base)).toBe(
+      `FROM read_parquet('${url('sensor_accel_1.parquet')}')`
+    );
+  });
+
+  it('resolves every reference in a join', () => {
+    const sql =
+      "FROM read_parquet('vehicle_angular_velocity') v " +
+      "ASOF JOIN read_parquet('vehicle_rates_setpoint') s ON v.timestamp >= s.timestamp";
+    expect(resolveTopicRefs(sql, base)).toBe(
+      `FROM read_parquet('${url('vehicle_angular_velocity.parquet')}') v ` +
+        `ASOF JOIN read_parquet('${url('vehicle_rates_setpoint.parquet')}') s ON v.timestamp >= s.timestamp`
+    );
+  });
+
+  it('tolerates whitespace inside the call', () => {
+    expect(resolveTopicRefs("read_parquet( 'cpuload' )", base)).toBe(
+      `read_parquet('${url('cpuload.parquet')}')`
+    );
+  });
+
+  it('leaves absolute paths and URLs untouched', () => {
+    for (const ref of [
+      "read_parquet('/api/logs/other/data/sensor_mag.parquet')",
+      "read_parquet('https://example.com/x.parquet')",
+    ]) {
+      expect(resolveTopicRefs(ref, base)).toBe(ref);
+    }
+  });
+
+  it('leaves non-read_parquet SQL untouched', () => {
+    const sql = "SELECT 'sensor_mag' AS label, timestamp FROM read_json('x')";
+    expect(resolveTopicRefs(sql, base)).toBe(sql);
   });
 });
 

@@ -2,7 +2,7 @@
 	import { onMount, onDestroy } from 'svelte';
 	import uPlot from 'uplot';
 	import type { PlotConfig, FlightMetadata } from '$lib/types';
-	import { activePlots, togglePlotMinimized } from '$lib/stores/logViewer';
+	import { activePlots, togglePlotMinimized, editSqlPlot } from '$lib/stores/logViewer';
 	import { timeRange, setTimeRange, cursorTimestamp, SYNC_KEY } from '$lib/stores/plotSync';
 	import { initDuckDB, LogSession } from '$lib/utils/duckdb';
 	import { touchZoomPlugin } from '$lib/utils/uplotTouchZoom';
@@ -37,6 +37,15 @@
 	let error = $state<string | null>(null);
 	let plotHeight = $state(300);
 
+	// Series metadata actually rendered. For timeseries plots this mirrors
+	// config.fields/colors; for SQL plots it comes from the query result.
+	const PLOT_COLORS = ['#818cf8', '#fbbf24', '#34d399', '#f87171', '#a78bfa', '#fb923c', '#38bdf8', '#e879f9'];
+	let seriesLabels = $state<string[]>([]);
+	let seriesColors = $state<string[]>([]);
+	// Whether the x-axis is the shared seconds domain (SQL plots: only with a
+	// `timestamp` column). Non-time plots stay out of the time-range sync.
+	let timeSynced = $state(true);
+
 	// Guard against infinite loops when syncing scales
 	let settingScale = false;
 
@@ -45,8 +54,8 @@
 	let pendingSyncRange: [number, number] | null = null;
 	let intersectionObserver: IntersectionObserver | null = null;
 
-	// Track the fields key to detect changes
-	let lastFieldsKey = '';
+	// Track the render key (fields or SQL text) to detect changes
+	let lastRenderKey = '';
 
 	async function getSession(): Promise<LogSession> {
 		if (sessionCache.has(logId)) return sessionCache.get(logId)!;
@@ -60,37 +69,74 @@
 		activePlots.update((plots) => plots.filter((p) => p.id !== config.id));
 	}
 
+	function editSql() {
+		// Hand the config to the builder, which opens in edit mode.
+		editSqlPlot.set(config);
+	}
+
 	function downloadPng() {
 		if (!chartEl) return;
 		const canvas = chartEl.querySelector('canvas');
 		if (!canvas) return;
 		const link = document.createElement('a');
-		link.download = `${config.topic}.png`;
+		link.download = `${(config.topic || config.yLabel || 'plot').replace(/[^a-z0-9_-]+/gi, '_')}.png`;
 		link.href = canvas.toDataURL('image/png');
 		link.click();
 	}
 
-	async function loadAndRender(fields: string[], colors: string[]) {
-		const fieldsKey = fields.join(',');
-		if (fieldsKey === lastFieldsKey && uplot) return;
-		lastFieldsKey = fieldsKey;
+	function renderKey(): string {
+		// Include yLabel so renaming a plot rebuilds it and refreshes the y-axis label
+		const base = config.kind === 'sql' ? `sql:${config.sql ?? ''}` : config.fields.join(',');
+		return `${base}|y:${config.yLabel ?? ''}`;
+	}
+
+	async function loadAndRender() {
+		const key = renderKey();
+		if (key === lastRenderKey && uplot) return;
+		lastRenderKey = key;
 
 		loading = true;
 		error = null;
 
 		try {
 			const session = await getSession();
-			const result = await session.queryTopic(config.topic, fields, {
-				multiId: config.multiId
-			});
 
-			if (!result) {
-				// Auto-remove plots with no data (e.g. field names don't exist in this log version)
-				removePlot();
-				return;
+			let xData: Float64Array;
+			let series: Float64Array[];
+			let labels: string[];
+
+			if (config.kind === 'sql') {
+				const result = await session.querySql(config.sql ?? '');
+				if (!result) {
+					// Don't auto-remove a user's SQL plot on an empty result — surface it.
+					error = 'Query returned no rows.';
+					loading = false;
+					return;
+				}
+				xData = result.x;
+				series = result.series;
+				labels = result.labels;
+				timeSynced = result.xIsTime;
+			} else {
+				const result = await session.queryTopic(config.topic, config.fields, {
+					multiId: config.multiId
+				});
+				if (!result) {
+					// Auto-remove plots with no data (e.g. field names don't exist in this log version)
+					removePlot();
+					return;
+				}
+				xData = result.timestamps;
+				series = result.series;
+				labels = config.fields;
+				timeSynced = true;
 			}
 
-			const data: uPlot.AlignedData = [result.timestamps, ...result.series];
+			const colors = labels.map((_, i) => config.colors[i] ?? PLOT_COLORS[i % PLOT_COLORS.length]);
+			seriesLabels = labels;
+			seriesColors = colors;
+
+			const data: uPlot.AlignedData = [xData, ...series];
 
 			// clientWidth is the post-layout, clip-aware inner width, so the plot
 			// is never created wider than the column actually allows.
@@ -113,7 +159,8 @@
 				height: plotHeight,
 				plugins: [touchZoomPlugin()],
 				cursor: {
-					sync: { key: SYNC_KEY, setSeries: true },
+					// Only cross-sync the cursor among plots sharing the time axis.
+					sync: timeSynced ? { key: SYNC_KEY, setSeries: false } : undefined,
 					drag: { x: true, y: false, setScale: true },
 				},
 				scales: {
@@ -133,7 +180,8 @@
 				hooks: {
 					setScale: [
 						(u: uPlot, scaleKey: string) => {
-							if (scaleKey !== 'x' || settingScale) return;
+							// Non-time plots must not write into the shared seconds range.
+							if (scaleKey !== 'x' || settingScale || !timeSynced) return;
 							const min = u.scales.x.min;
 							const max = u.scales.x.max;
 							if (min != null && max != null) {
@@ -143,6 +191,7 @@
 					],
 					setCursor: [
 						(u: uPlot) => {
+							if (!timeSynced) return; // don't broadcast a non-time x as the shared cursor
 							const idx = u.cursor.idx;
 							if (idx != null && data[0]) {
 								cursorTimestamp.set(data[0][idx]);
@@ -152,9 +201,9 @@
 				},
 				series: [
 					{}, // x-axis series
-					...fields.map((field: string, i: number) => ({
-						label: field,
-						stroke: colors[i] ?? '#818cf8',
+					...labels.map((label: string, i: number) => ({
+						label,
+						stroke: colors[i],
 						width: 1.5,
 					})),
 				],
@@ -226,17 +275,15 @@
 		}
 
 		// Initial load
-		loadAndRender(config.fields, config.colors);
+		loadAndRender();
 	});
 
-	// React to config.fields changes (when user adds/removes a field in an existing topic)
+	// Re-render when the plot's definition changes: fields for timeseries
+	// plots, or the SQL text for SQL plots.
 	$effect(() => {
-		const fields = config.fields;
-		const colors = config.colors;
-		// Only re-render if fields actually changed
-		const key = fields.join(',');
-		if (key !== lastFieldsKey) {
-			loadAndRender(fields, colors);
+		const key = renderKey();
+		if (key !== lastRenderKey) {
+			loadAndRender();
 		}
 	});
 
@@ -245,6 +292,7 @@
 	$effect(() => {
 		const range = $timeRange;
 		if (!uplot || settingScale) return;
+		if (range && !timeSynced) return;
 
 		if (!isVisible) {
 			// Stash for later — will be applied when plot scrolls into view
@@ -329,19 +377,28 @@
 				</div>
 			{/if}
 			<span class="text-xs sm:text-sm font-medium text-gray-900">{config.yLabel && config.yLabel !== config.topic ? config.yLabel : config.topic}</span>
-			{#if config.yLabel && config.yLabel !== config.topic}
+			{#if config.kind === 'sql'}
+				<span class="text-[10px] font-medium text-indigo-500 bg-indigo-50 rounded px-1.5 py-0.5">SQL</span>
+			{:else if config.yLabel && config.yLabel !== config.topic}
 				<span class="text-[10px] text-gray-400">{config.topic}</span>
 			{/if}
 			<div class="flex flex-wrap items-center gap-x-1.5 sm:gap-x-3 gap-y-1 text-xs">
-				{#each config.fields as field, i}
+				{#each seriesLabels as label, i}
 					<span class="flex items-center gap-1.5">
-						<span class="w-3 h-0.5 rounded" style="background-color: {config.colors[i] ?? '#818cf8'};"></span>
-						<span class="text-gray-500">{field}</span>
+						<span class="w-3 h-0.5 rounded" style="background-color: {seriesColors[i]};"></span>
+						<span class="text-gray-500">{label}</span>
 					</span>
 				{/each}
 			</div>
 		</div>
 		<div class="flex items-center gap-1">
+			{#if config.kind === 'sql'}
+				<button class="text-gray-400 hover:text-indigo-600" onclick={editSql} aria-label="Edit SQL">
+					<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+						<path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zM19.5 7.125L16.875 4.5" />
+					</svg>
+				</button>
+			{/if}
 			<button class="text-gray-400 hover:text-gray-600" onclick={downloadPng} aria-label="Download as PNG">
 				<svg class="size-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
 					<path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12M12 16.5V3" />
