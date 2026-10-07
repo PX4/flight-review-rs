@@ -176,7 +176,7 @@
 					</tr>
 				</thead>
 				<tbody class="divide-y divide-gray-100">
-					{#each sortedRows as row (row.pid)}
+					{#each sortedRows as row, i (row.pid + '_' + i)}
 						{@const idle = isIdle(row)}
 						{@const sPct = stackPct(row)}
 						<tr class="hover:bg-gray-50 {idle ? 'opacity-50' : ''}">
