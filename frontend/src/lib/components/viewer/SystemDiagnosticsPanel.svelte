@@ -10,9 +10,17 @@
 		return lines.join('\n');
 	}
 
+	// Each entry is a complete `top` snapshot; a log can hold several. Joining
+	// them would repeat every PID, so show only the most recent one.
+	function getLastSnapshot(key: string): string | null {
+		const snapshots = multiInfo[key];
+		if (!snapshots || snapshots.length === 0) return null;
+		return snapshots[snapshots.length - 1];
+	}
+
 	const consoleOutput = $derived(getText('boot_console_output'));
-	const perfTopPre = $derived(getText('perf_top_preflight'));
-	const perfTopPost = $derived(getText('perf_top_postflight'));
+	const perfTopPre = $derived(getLastSnapshot('perf_top_preflight'));
+	const perfTopPost = $derived(getLastSnapshot('perf_top_postflight'));
 	const perfCounterPre = $derived(getText('perf_counter_preflight'));
 	const perfCounterPost = $derived(getText('perf_counter_postflight'));
 </script>
