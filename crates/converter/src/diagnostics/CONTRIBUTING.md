@@ -242,6 +242,11 @@ validity flag, cell count, usable baseline or adequate sampling may be unavailab
 - TECS regions stop at observed recovery, unavailable fields or gaps over one
   second, and never claim
   aircraft control loss from a numerical value alone.
+- `position_aiding_loss` reports the selected estimator's `xy_valid` going
+  from valid to invalid while armed and not landed. It does not name the lost
+  aiding source, and a vehicle that never had a valid horizontal estimate is
+  not reported. Regions end on recovery, landing, disarm or the last observed
+  invalid sample.
 
 Fixture ground truth established during the correctness audit:
 
@@ -252,6 +257,7 @@ Fixture ground truth established during the correctness audit:
 | `gps_interference.ulg` | No degradation finding: all 312 readings have no fix and zero satellites |
 | `ekf_selector_whipsaw.ulg` | Real selector counter changes and independently sustained instance-0 innovations |
 | `tecs_nonfinite_pitch.ulg` | Integrator first non-finite at 1,029,918,348µs through the last TECS sample |
+| `position_aiding_loss.ulg` | Log 0dce354d: `xy_valid` 1 to 0 at 154,258,302µs while airborne (takeoff 153,791,514µs), landed at 159,900,920µs |
 
 Positive field data is still needed for motor commands, connected low batteries,
 GPS degradation and RC loss. Do not turn the negative fixtures into positive

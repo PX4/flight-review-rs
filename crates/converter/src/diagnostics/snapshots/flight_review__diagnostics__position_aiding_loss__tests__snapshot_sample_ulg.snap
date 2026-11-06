@@ -1,0 +1,5 @@
+---
+source: crates/converter/src/diagnostics/position_aiding_loss.rs
+expression: diags
+---
+[]

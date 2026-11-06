@@ -68,6 +68,18 @@ fn tecs(ts: u64, value: f32) -> B {
         .field_f32("throttle_integ", 0.1)
 }
 
+fn land(ts: u64, landed: bool) -> B {
+    B::new("vehicle_land_detected")
+        .timestamp(ts)
+        .field_bool("landed", landed)
+}
+
+fn local_position(ts: u64, xy_valid: bool) -> B {
+    B::new("vehicle_local_position")
+        .timestamp(ts)
+        .field_bool("xy_valid", xy_valid)
+}
+
 pub(super) fn positive_case(id: &str) -> Vec<Diagnostic> {
     let mut a = analyzer(id);
     arm(a.as_mut());
@@ -100,6 +112,11 @@ pub(super) fn positive_case(id: &str) -> Vec<Diagnostic> {
             feed(a.as_mut(), tecs(1_000_000, f32::NAN), 0);
             feed(a.as_mut(), tecs(2_000_000, 0.1), 0);
         }
+        "position_aiding_loss" => {
+            feed(a.as_mut(), land(500_000, false), 0);
+            feed(a.as_mut(), local_position(1_000_000, true), 0);
+            feed(a.as_mut(), local_position(2_000_000, false), 0);
+        }
         _ => panic!("missing positive control for {id}"),
     }
     a.finish()
@@ -110,6 +127,10 @@ fn no_false_positives_with_armed_topic_present_controls() {
     for mut a in crate::diagnostics::create_analyzers() {
         arm(a.as_mut());
         for instance in [0, 1] {
+            if a.id() == "position_aiding_loss" {
+                // Airborne, so a valid estimate is checked in the gated state.
+                feed(a.as_mut(), land(1, false), instance);
+            }
             for i in 0..=60 {
                 let ts = i * 100_000;
                 let message = match a.id() {
@@ -120,6 +141,7 @@ fn no_false_positives_with_armed_topic_present_controls() {
                     "ekf_failure" => ekf(ts, 0.2),
                     "ekf_selector_whipsaw" => selector(ts, 1, 0.2),
                     "tecs_nonfinite_pitch" => tecs(ts, 0.1),
+                    "position_aiding_loss" => local_position(ts, true),
                     id => panic!("missing healthy control for {id}"),
                 };
                 feed(a.as_mut(), message, instance);
@@ -565,4 +587,51 @@ fn rc_recovery_preserves_pre_loss_signal_evidence() {
             signal_lost_duration_ms: 2000
         }
     ));
+}
+
+#[test]
+fn position_aiding_loss_instances_stale_samples_and_deferred_disarm() {
+    use crate::diagnostics::PositionAidingLossEnd;
+
+    let mut a = analyzer("position_aiding_loss");
+    arm(a.as_mut());
+    feed(a.as_mut(), land(500_000, false), 0);
+    feed(a.as_mut(), local_position(1_000_000, true), 0);
+    // A stale land-detected sample cannot end the flight retroactively.
+    feed(a.as_mut(), land(900_000, true), 0);
+    feed(a.as_mut(), local_position(2_000_000, false), 0);
+    // Instance 1 has no land-detected state of its own, so it never fires.
+    feed(a.as_mut(), local_position(1_000_000, true), 1);
+    feed(a.as_mut(), local_position(2_000_000, false), 1);
+    // Disarm after the last measurement is applied when the log ends.
+    feed(
+        a.as_mut(),
+        B::new("vehicle_status")
+            .timestamp(3_000_000)
+            .field_u8("arming_state", 1),
+        0,
+    );
+    let diags = a.finish();
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    assert_eq!(diags[0].timestamp_us, 2_000_000);
+    assert_eq!(diags[0].anchor.instance, None);
+    assert_eq!(
+        diags[0].kind,
+        AnomalyKind::Region {
+            end_timestamp_us: 3_000_000
+        }
+    );
+    match &diags[0].evidence {
+        Evidence::PositionAidingLoss {
+            last_valid_timestamp_us,
+            invalid_duration_ms,
+            ended_by,
+        } => {
+            assert_eq!(*last_valid_timestamp_us, 1_000_000);
+            assert_eq!(*invalid_duration_ms, 1_000);
+            assert_eq!(*ended_by, PositionAidingLossEnd::Disarmed);
+        }
+        other => panic!("unexpected evidence {other:?}"),
+    }
+    assert_eq!(diags[0].severity, Severity::Warning);
 }
