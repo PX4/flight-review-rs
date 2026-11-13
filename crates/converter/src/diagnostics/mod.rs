@@ -22,6 +22,7 @@ pub mod ekf_failure;
 pub mod ekf_selector_whipsaw;
 pub mod gps_interference;
 pub mod motor_failure;
+pub mod position_aiding_loss;
 pub mod rc_loss;
 pub mod tecs_nonfinite_pitch;
 #[cfg(test)]
@@ -29,7 +30,7 @@ pub mod testing;
 
 /// Current analysis version. Bump when the analyzer set changes to trigger
 /// reprocessing of historical logs.
-pub const ANALYSIS_VERSION: u32 = 4;
+pub const ANALYSIS_VERSION: u32 = 5;
 
 /// Whether a diagnostic marks an instant or spans a time window.
 ///
@@ -156,6 +157,21 @@ pub enum TecsNonfinitePitchField {
     PitchSpRad,
 }
 
+/// Why a horizontal position loss region ended — typed discriminant.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PositionAidingLossEnd {
+    /// `xy_valid` was observed valid again.
+    Recovered,
+    /// `vehicle_land_detected.landed` became true.
+    Landed,
+    /// The vehicle disarmed.
+    Disarmed,
+    /// The log ended or `xy_valid` became unavailable; the region ends at the
+    /// last observed invalid sample.
+    Unobserved,
+}
+
 /// Typed evidence for each diagnostic kind.
 ///
 /// Every analyzer returns a specific variant — not a freeform map.
@@ -215,6 +231,13 @@ pub enum Evidence {
         /// True if `throttle_integ` was also non-finite at the same sample —
         /// a sibling-channel sanity check that the whole TECS state corrupted.
         throttle_integ_nonfinite: bool,
+    },
+    PositionAidingLoss {
+        /// Last `vehicle_local_position` sample with `xy_valid` true.
+        last_valid_timestamp_us: u64,
+        /// Region length from the loss to its end.
+        invalid_duration_ms: u64,
+        ended_by: PositionAidingLossEnd,
     },
 }
 
@@ -439,6 +462,9 @@ pub fn create_analyzers() -> Vec<Box<dyn Analyzer>> {
         >::default()),
         Box::new(PerInstance::<
             tecs_nonfinite_pitch::TecsNonfinitePitchAnalyzer,
+        >::default()),
+        Box::new(PerInstance::<
+            position_aiding_loss::PositionAidingLossAnalyzer,
         >::default()),
     ]
 }

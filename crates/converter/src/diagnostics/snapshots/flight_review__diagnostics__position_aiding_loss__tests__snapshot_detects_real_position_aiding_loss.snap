@@ -1,0 +1,43 @@
+---
+source: crates/converter/src/diagnostics/position_aiding_loss.rs
+expression: diags
+---
+[
+  {
+    "id": "position_aiding_loss",
+    "summary": "Horizontal position estimate became invalid in air at 154.3s, 5.6s until landing",
+    "severity": "warning",
+    "kind": {
+      "region": {
+        "end_timestamp_us": 159900920
+      }
+    },
+    "timestamp_us": 154258302,
+    "anchor": {
+      "topic": "vehicle_local_position",
+      "field": "xy_valid"
+    },
+    "descriptor": {
+      "fields": [
+        {
+          "name": "last_valid_timestamp_us",
+          "unit": "microseconds"
+        },
+        {
+          "name": "invalid_duration_ms",
+          "unit": "milliseconds"
+        },
+        {
+          "name": "ended_by",
+          "unit": "label"
+        }
+      ]
+    },
+    "evidence": {
+      "type": "PositionAidingLoss",
+      "last_valid_timestamp_us": 154158949,
+      "invalid_duration_ms": 5642,
+      "ended_by": "landed"
+    }
+  }
+]
